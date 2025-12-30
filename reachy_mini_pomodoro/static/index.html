@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reachy Mini Pomodoro</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="tomato">🍅</span>
+                <h1>Reachy Mini Pomodoro</h1>
+            </div>
+            <div class="stats-bar">
+                <div class="stat">
+                    <span class="stat-value" id="total-pomodoros">0</span>
+                    <span class="stat-label">Pomodoros</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value" id="completed-tasks">0</span>
+                    <span class="stat-label">Tasks Done</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Timer Section -->
+            <section class="timer-section">
+                <div class="timer-card">
+                    <div class="timer-state" id="timer-state">IDLE</div>
+                    <div class="timer-display" id="timer-display">25:00</div>
+                    <div class="current-task" id="current-task">
+                        <span class="current-task-label">Current Task:</span>
+                        <span class="current-task-name" id="current-task-name">No task selected</span>
+                    </div>
+                    <div class="timer-controls">
+                        <button class="btn btn-primary btn-large" id="btn-start">
+                            <span class="btn-icon">▶</span> Start Focus
+                        </button>
+                        <button class="btn btn-secondary" id="btn-pause" style="display: none;">
+                            <span class="btn-icon">⏸</span> Pause
+                        </button>
+                        <button class="btn btn-secondary" id="btn-resume" style="display: none;">
+                            <span class="btn-icon">▶</span> Resume
+                        </button>
+                        <button class="btn btn-danger" id="btn-stop" style="display: none;">
+                            <span class="btn-icon">⏹</span> Stop
+                        </button>
+                        <button class="btn btn-ghost" id="btn-skip" style="display: none;">
+                            Skip →
+                        </button>
+                        <button class="btn btn-success" id="btn-complete-task" style="display: none;">
+                            <span class="btn-icon">✓</span> Complete Task
+                        </button>
+                    </div>
+                    <div class="pomodoro-progress">
+                        <span id="pomodoro-dots"></span>
+                        <span class="progress-label" id="progress-label">0 / 4 until long break</span>
+                    </div>
+                </div>
+
+                <!-- Break Activity Card -->
+                <div class="break-activity-card" id="break-activity-card" style="display: none;">
+                    <h3>Break Activity</h3>
+                    <div class="activity-name" id="activity-name"></div>
+                    <div class="activity-description" id="activity-description"></div>
+                    <div class="activity-actions">
+                        <button class="btn btn-ghost" id="btn-demo-activity">
+                            🤖 Let Reachy Demo
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tasks Section -->
+            <section class="tasks-section">
+                <div class="tasks-header">
+                    <h2>Tasks</h2>
+                    <div class="tasks-header-actions">
+                        <button class="btn btn-ghost" id="btn-history">📊 Analytics</button>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="filters-bar" id="filters-bar">
+                    <div class="filter-group">
+                        <span class="filter-label">Day:</span>
+                        <div class="filter-buttons" id="day-filter">
+                            <button class="filter-btn active" data-value="">All</button>
+                            <button class="filter-btn" data-value="today">Today</button>
+                            <button class="filter-btn" data-value="tomorrow">Tomorrow</button>
+                            <button class="filter-btn" data-value="week">This Week</button>
+                            <button class="filter-btn" data-value="overdue">Overdue</button>
+                        </div>
+                    </div>
+                    <div class="filter-group">
+                        <span class="filter-label">Priority:</span>
+                        <div class="filter-buttons" id="priority-filter">
+                            <button class="filter-btn active" data-value="">All</button>
+                            <button class="filter-btn priority-high" data-value="high">High</button>
+                            <button class="filter-btn priority-medium" data-value="medium">Medium</button>
+                            <button class="filter-btn priority-low" data-value="low">Low</button>
+                        </div>
+                    </div>
+                    <div class="filter-group tag-filter" id="tag-filter">
+                        <span class="filter-label">Tag:</span>
+                        <div class="tag-list" id="tag-list"></div>
+                    </div>
+                </div>
+
+                <!-- Add Task Form -->
+                <div class="add-task-form">
+                    <input type="text" id="new-task-title" placeholder="What are you working on?" maxlength="100">
+                    <div class="form-row">
+                        <div class="pomodoro-selector">
+                            <label>Pomodoros:</label>
+                            <div class="pomodoro-buttons" id="pomodoro-buttons">
+                                <button class="pom-btn active" data-value="1">1</button>
+                                <button class="pom-btn" data-value="2">2</button>
+                                <button class="pom-btn" data-value="3">3</button>
+                                <button class="pom-btn" data-value="4">4</button>
+                                <button class="pom-btn" data-value="5">5+</button>
+                            </div>
+                        </div>
+                        <div class="priority-selector">
+                            <label>Priority:</label>
+                            <div class="priority-buttons" id="priority-buttons">
+                                <button class="priority-btn" data-value="low">Low</button>
+                                <button class="priority-btn active" data-value="medium">Medium</button>
+                                <button class="priority-btn" data-value="high">High</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="due-date-group">
+                            <label>Due:</label>
+                            <input type="date" id="new-task-due-date">
+                        </div>
+                        <div class="tag-selector-group">
+                            <label>Tags:</label>
+                            <div class="tag-selector" id="tag-selector">
+                                <div class="selected-tags" id="selected-tags"></div>
+                                <button type="button" class="btn-add-tag" id="btn-add-tag">+ Add Tag</button>
+                                <div class="tag-dropdown-wrapper" id="tag-dropdown-wrapper" style="display: none;">
+                                    <input type="text" id="tag-input" placeholder="Search or create..." autocomplete="off">
+                                    <div class="tag-dropdown" id="tag-dropdown"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="btn-add-task">Add Task</button>
+                </div>
+
+                <!-- Task List -->
+                <div class="task-list" id="task-list">
+                    <!-- Tasks will be rendered here -->
+                </div>
+
+            </section>
+        </main>
+
+        <!-- Analytics Modal -->
+        <div class="modal-overlay" id="history-modal" style="display: none;">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Progress</h2>
+                    <button class="btn-close" id="btn-close-history">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="history-stats" id="history-stats">
+                        <!-- Stats will be rendered here -->
+                    </div>
+                    <div class="completed-tasks-section" id="completed-tasks-section">
+                        <div class="completed-tasks-header" id="completed-tasks-header">
+                            <span class="completed-tasks-toggle">▼</span>
+                            <h3>Done</h3>
+                            <span class="completed-tasks-badge" id="completed-tasks-badge">0</span>
+                        </div>
+                        <div class="completed-tasks-list" id="completed-tasks-list">
+                            <!-- Completed tasks will be rendered here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div class="modal-overlay" id="settings-modal" style="display: none;">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>Settings</h2>
+                    <button class="btn-close" id="btn-close-settings">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="setting-group">
+                        <label>Focus Duration (minutes)</label>
+                        <input type="number" id="setting-focus" min="1" max="60" value="25">
+                    </div>
+                    <div class="setting-group">
+                        <label>Short Break (minutes)</label>
+                        <input type="number" id="setting-short-break" min="1" max="30" value="5">
+                    </div>
+                    <div class="setting-group">
+                        <label>Long Break (minutes)</label>
+                        <input type="number" id="setting-long-break" min="1" max="60" value="15">
+                    </div>
+                    <div class="setting-group">
+                        <label>Pomodoros until Long Break</label>
+                        <input type="number" id="setting-long-break-interval" min="2" max="10" value="4">
+                    </div>
+                    <div class="setting-group setting-toggle">
+                        <label>Focus Music</label>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="music-enabled" checked>
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" id="btn-save-settings">Save Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <button class="btn btn-ghost" id="btn-settings">⚙️ Settings</button>
+            <div class="robot-actions">
+                <button class="btn btn-ghost" id="btn-celebrate">🎉 Celebrate</button>
+                <button class="btn btn-ghost" id="btn-stretch">🧘 Stretch Demo</button>
+                <button class="btn btn-ghost" id="btn-breathe">🌬️ Breathe Demo</button>
+            </div>
+            <div class="footer-logo">
+                <span class="tomato">🍅</span>
+                <span class="footer-brand">Reachy Mini Pomodoro</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="/static/main.js"></script>
+</body>
+</html>
