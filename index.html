@@ -12,58 +12,169 @@
             <div class="logo">🍅</div>
             <h1>Reachy Mini Pomodoro</h1>
             <p class="tagline">Stay focused with Compita, your AI-powered productivity companion</p>
+            <div class="hero-badges">
+                <span class="badge">Reachy Mini App</span>
+                <span class="badge">Voice Powered</span>
+                <span class="badge">OpenAI GPT-4o</span>
+            </div>
         </div>
 
         <div class="features">
             <div class="feature">
                 <span class="feature-icon">⏱️</span>
                 <h3>Pomodoro Timer</h3>
-                <p>25-minute focus sessions with short and long breaks</p>
+                <p>25-minute focus sessions with 5-minute short breaks and 15-minute long breaks</p>
             </div>
             <div class="feature">
                 <span class="feature-icon">🎙️</span>
                 <h3>Compita Voice Assistant</h3>
-                <p>Control your timer with natural voice commands</p>
+                <p>Control your timer with natural voice commands using wake word "Compita"</p>
             </div>
             <div class="feature">
                 <span class="feature-icon">📋</span>
                 <h3>Task Management</h3>
-                <p>Track tasks with priorities and tags</p>
+                <p>Create tasks with estimated pomodoros, priorities, due dates, and tags</p>
             </div>
             <div class="feature">
                 <span class="feature-icon">🤖</span>
                 <h3>Robot Expressions</h3>
-                <p>Reachy celebrates your progress and guides breaks</p>
+                <p>Reachy celebrates your progress, guides breathing exercises, and demos stretches</p>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">📊</span>
+                <h3>Progress Tracking</h3>
+                <p>View productivity statistics, session history, and completed tasks</p>
+            </div>
+            <div class="feature">
+                <span class="feature-icon">🧘</span>
+                <h3>Break Activities</h3>
+                <p>Guided breathing exercises and stretches demonstrated by Reachy during breaks</p>
             </div>
         </div>
 
         <div class="voice-commands">
             <h2>Voice Commands</h2>
             <p>Say "Compita" to wake up your assistant, then:</p>
-            <ul>
-                <li>"Start a focus session"</li>
-                <li>"How much time is left?"</li>
-                <li>"Add a task called review code"</li>
-                <li>"Mark this task as done"</li>
-                <li>"I need a break"</li>
-                <li>"Show me the breathing exercise"</li>
-            </ul>
+            <div class="commands-grid">
+                <div class="command-group">
+                    <h4>Timer Control</h4>
+                    <ul>
+                        <li>"Start a focus session"</li>
+                        <li>"How much time is left?"</li>
+                        <li>"Pause the timer"</li>
+                        <li>"Resume"</li>
+                        <li>"Skip this session"</li>
+                        <li>"I need a break"</li>
+                    </ul>
+                </div>
+                <div class="command-group">
+                    <h4>Task Management</h4>
+                    <ul>
+                        <li>"Add a task called review code"</li>
+                        <li>"What are my tasks?"</li>
+                        <li>"Mark this task as done"</li>
+                        <li>"How productive was I today?"</li>
+                    </ul>
+                </div>
+                <div class="command-group">
+                    <h4>Break Activities</h4>
+                    <ul>
+                        <li>"What's the break activity?"</li>
+                        <li>"Show me the breathing exercise"</li>
+                        <li>"Demo the stretch"</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="robot-behaviors">
+            <h2>Robot Behaviors</h2>
+            <div class="behaviors-grid">
+                <div class="behavior">
+                    <span class="behavior-state">Listening</span>
+                    <span class="behavior-action">Subtle nod</span>
+                </div>
+                <div class="behavior">
+                    <span class="behavior-state">Speaking</span>
+                    <span class="behavior-action">Talking animation</span>
+                </div>
+                <div class="behavior">
+                    <span class="behavior-state">Focus Start</span>
+                    <span class="behavior-action">Wake up animation</span>
+                </div>
+                <div class="behavior">
+                    <span class="behavior-state">During Focus</span>
+                    <span class="behavior-action">Gentle breathing</span>
+                </div>
+                <div class="behavior">
+                    <span class="behavior-state">Focus Complete</span>
+                    <span class="behavior-action">Celebration</span>
+                </div>
+                <div class="behavior">
+                    <span class="behavior-state">Break Time</span>
+                    <span class="behavior-action">Breathing/stretch demo</span>
+                </div>
+                <div class="behavior">
+                    <span class="behavior-state">Task Complete</span>
+                    <span class="behavior-action">Victory dance</span>
+                </div>
+            </div>
         </div>
 
         <div class="install-section">
             <h2>Installation</h2>
             <p>Install from the Reachy Mini Dashboard or run:</p>
             <code>pip install git+https://huggingface.co/spaces/adonaivera/reachy_mini_pomodoro</code>
+            <p class="alt-install">Or clone from GitHub:</p>
+            <code>git clone https://github.com/AdonaiVera/reachy_mini_pomodoro</code>
         </div>
 
         <div class="requirements">
             <h2>Requirements</h2>
             <ul>
-                <li>Reachy Mini robot</li>
+                <li>Reachy Mini robot (wireless or USB)</li>
                 <li>Python 3.10+</li>
                 <li>OpenAI API key (for Compita voice assistant)</li>
+                <li>Modern web browser with microphone access</li>
             </ul>
         </div>
+
+        <div class="api-section">
+            <h2>REST API</h2>
+            <p>The app exposes a REST API at <code class="inline">http://localhost:8042/api/</code></p>
+            <div class="api-endpoints">
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="path">/api/status</span>
+                    <span class="desc">Timer and task status</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="path">/api/timer/start</span>
+                    <span class="desc">Start focus session</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method post">POST</span>
+                    <span class="path">/api/tasks</span>
+                    <span class="desc">Create task</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method get">GET</span>
+                    <span class="path">/api/stats</span>
+                    <span class="desc">Productivity statistics</span>
+                </div>
+                <div class="endpoint">
+                    <span class="method ws">WS</span>
+                    <span class="path">/api/compita/stream</span>
+                    <span class="desc">Voice streaming</span>
+                </div>
+            </div>
+        </div>
+
+        <footer class="landing-footer">
+            <p>Created by <a href="https://www.linkedin.com/in/adonai-vera/" target="_blank" rel="noopener">@adonaivera</a></p>
+            <p class="license">MIT License</p>
+        </footer>
     </div>
 </body>
 </html>

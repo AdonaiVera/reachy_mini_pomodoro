@@ -219,12 +219,46 @@
                         <label>Pomodoros until Long Break</label>
                         <input type="number" id="setting-long-break-interval" min="2" max="10" value="4">
                     </div>
+                    <!-- Compita Settings Divider -->
+                    <div class="settings-divider">
+                        <span>Compita Voice Assistant</span>
+                    </div>
+
                     <div class="setting-group setting-toggle">
-                        <label>Focus Music</label>
+                        <label>Enable Compita</label>
                         <label class="toggle-switch">
-                            <input type="checkbox" id="music-enabled" checked>
+                            <input type="checkbox" id="compita-enabled" checked>
                             <span class="toggle-slider"></span>
                         </label>
+                    </div>
+
+                    <div class="setting-group" id="compita-api-key-group">
+                        <label>OpenAI API Key</label>
+                        <div class="api-key-input">
+                            <input type="password" id="setting-openai-key" placeholder="sk-..." autocomplete="off">
+                            <button type="button" class="btn-toggle-visibility" id="btn-toggle-key" title="Show/Hide API Key">
+                                <span class="eye-icon">👁️</span>
+                            </button>
+                        </div>
+                        <span class="setting-hint">Required for voice commands. Get your key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">OpenAI</a></span>
+                    </div>
+
+                    <div class="setting-group" id="compita-voice-group">
+                        <label>Voice</label>
+                        <select id="setting-voice">
+                            <option value="coral">Coral (Default)</option>
+                            <option value="alloy">Alloy</option>
+                            <option value="echo">Echo</option>
+                            <option value="fable">Fable</option>
+                            <option value="onyx">Onyx</option>
+                            <option value="nova">Nova</option>
+                            <option value="shimmer">Shimmer</option>
+                        </select>
+                    </div>
+
+                    <div class="compita-status" id="compita-status">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Checking status...</span>
                     </div>
                 </div>
                 <div class="modal-footer">

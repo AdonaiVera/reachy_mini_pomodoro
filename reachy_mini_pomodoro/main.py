@@ -56,6 +56,12 @@ class UpdateSettingsRequest(BaseModel):
     pomodoros_until_long_break: Optional[int] = None
 
 
+class UpdateCompitaSettingsRequest(BaseModel):
+    enabled: Optional[bool] = None
+    openai_api_key: Optional[str] = None
+    voice: Optional[str] = None
+
+
 class ReachyMiniPomodoro(ReachyMiniApp):
     """Pomodoro productivity timer app with Reachy Mini robot companion."""
 
@@ -392,12 +398,79 @@ class ReachyMiniPomodoro(ReachyMiniApp):
         @self.settings_app.get("/api/compita/status")
         def get_compita_status():
             """Get Compita voice assistant status."""
+            import os
+            # Check both dashboard setting and environment variable
+            has_api_key = bool(
+                self._compita_settings.openai_api_key or os.getenv("OPENAI_API_KEY")
+            )
             if self._compita:
                 return {
-                    "enabled": True,
+                    "enabled": self._compita_settings.enabled,
                     "running": self._compita.is_running(),
+                    "has_api_key": has_api_key,
                 }
-            return {"enabled": False, "running": False}
+            return {
+                "enabled": self._compita_settings.enabled,
+                "running": False,
+                "has_api_key": has_api_key,
+            }
+
+        @self.settings_app.get("/api/compita/settings")
+        def get_compita_settings():
+            """Get Compita voice assistant settings."""
+            # Return masked API key for security
+            api_key = self._compita_settings.openai_api_key
+            masked_key = ""
+            if api_key:
+                if len(api_key) > 8:
+                    masked_key = api_key[:7] + "..." + api_key[-4:]
+                else:
+                    masked_key = "••••••••"
+
+            return {
+                "enabled": self._compita_settings.enabled,
+                "openai_api_key": masked_key,
+                "voice": self._compita_settings.voice,
+                "has_api_key": bool(api_key),
+            }
+
+        @self.settings_app.put("/api/compita/settings")
+        def update_compita_settings(request: UpdateCompitaSettingsRequest):
+            """Update Compita voice assistant settings."""
+            restart_needed = False
+
+            if request.enabled is not None:
+                self._compita_settings.enabled = request.enabled
+                restart_needed = True
+
+            if request.openai_api_key is not None:
+                # Only update if it's a new key (not masked)
+                new_key = request.openai_api_key.strip()
+                if new_key and not new_key.startswith("•") and new_key != "":
+                    self._compita_settings.openai_api_key = new_key
+                    restart_needed = True
+
+            if request.voice is not None:
+                valid_voices = ["alloy", "echo", "fable", "onyx", "nova", "shimmer", "coral"]
+                if request.voice in valid_voices:
+                    self._compita_settings.voice = request.voice
+                    restart_needed = True
+
+            # Restart Compita if settings changed
+            if restart_needed and self._compita_settings.enabled:
+                self._stop_compita()
+                self._start_compita()
+            elif restart_needed and not self._compita_settings.enabled:
+                self._stop_compita()
+
+            return {
+                "success": True,
+                "settings": {
+                    "enabled": self._compita_settings.enabled,
+                    "voice": self._compita_settings.voice,
+                    "has_api_key": bool(self._compita_settings.openai_api_key),
+                }
+            }
 
         @self.settings_app.websocket("/api/compita/stream")
         async def compita_stream(websocket: WebSocket):
@@ -442,10 +515,15 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                         pass
 
                 # Create session with wake word detection
+                # Pass None if no API key set so it falls back to env var
+                api_key = self._compita_settings.openai_api_key or None
                 session = CompitaVoiceSession(
                     timer=self.timer,
                     task_manager=self.task_manager,
                     movement_manager=self.movement_manager,
+                    openai_api_key=api_key,
+                    model=self._compita_settings.model,
+                    voice=self._compita_settings.voice,
                     on_audio_output=lambda b: asyncio.create_task(send_audio(b)),
                     on_transcript=lambda r, t: asyncio.create_task(send_transcript(r, t)),
                     on_state_change=lambda s: asyncio.create_task(send_state(s)),

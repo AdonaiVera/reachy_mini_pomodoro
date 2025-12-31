@@ -38,10 +38,12 @@ let currentPriorityFilter = '';
 let updateInterval = null;
 let selectedTags = [];
 let availableTags = [];
-let musicEnabled = true;
-let focusAudio = null;
-let audioInitialized = false;
 let lastTimerState = 'idle';
+let compitaSettings = {
+    enabled: true,
+    openai_api_key: '',
+    voice: 'coral'
+};
 
 const elements = {
     timerState: document.getElementById('timer-state'),
@@ -85,14 +87,20 @@ const elements = {
     completedTasksHeader: document.getElementById('completed-tasks-header'),
     completedTasksBadge: document.getElementById('completed-tasks-badge'),
     btnCompleteTask: document.getElementById('btn-complete-task'),
-    musicEnabled: document.getElementById('music-enabled'),
     btnAddTag: document.getElementById('btn-add-tag'),
     tagDropdownWrapper: document.getElementById('tag-dropdown-wrapper'),
     newTaskDueDate: document.getElementById('new-task-due-date'),
     priorityButtons: document.getElementById('priority-buttons'),
     dayFilter: document.getElementById('day-filter'),
     priorityFilter: document.getElementById('priority-filter'),
-    filtersBar: document.getElementById('filters-bar')
+    filtersBar: document.getElementById('filters-bar'),
+    compitaEnabled: document.getElementById('compita-enabled'),
+    openaiKeyInput: document.getElementById('setting-openai-key'),
+    voiceSelect: document.getElementById('setting-voice'),
+    btnToggleKey: document.getElementById('btn-toggle-key'),
+    compitaStatus: document.getElementById('compita-status'),
+    compitaApiKeyGroup: document.getElementById('compita-api-key-group'),
+    compitaVoiceGroup: document.getElementById('compita-voice-group')
 };
 
 async function apiCall(endpoint, method = 'GET', body = null) {
@@ -292,61 +300,9 @@ function hideTagDropdown() {
     }, 150);
 }
 
-function initAudio() {
-    if (audioInitialized) return;
-
-    focusAudio = new Audio('https://cdn.pixabay.com/audio/2022/10/25/audio_946f9c5e58.mp3');
-    focusAudio.loop = true;
-    focusAudio.volume = 0.3;
-    audioInitialized = true;
-}
-
-function playFocusMusic() {
-    if (!musicEnabled || !focusAudio) return;
-
-    const playPromise = focusAudio.play();
-    if (playPromise !== undefined) {
-        playPromise.catch(() => {
-            console.log('Audio playback requires user interaction first');
-        });
-    }
-}
-
-function stopFocusMusic() {
-    if (focusAudio) {
-        focusAudio.pause();
-        focusAudio.currentTime = 0;
-    }
-}
-
-function toggleMusic(enabled) {
-    musicEnabled = enabled;
-    localStorage.setItem('musicEnabled', enabled ? 'true' : 'false');
-
-    if (enabled && appState.timer.state === 'focus') {
-        playFocusMusic();
-    } else {
-        stopFocusMusic();
-    }
-}
-
-function loadMusicSetting() {
-    const saved = localStorage.getItem('musicEnabled');
-    if (saved !== null) {
-        musicEnabled = saved === 'true';
-    }
-}
-
 function handleTimerStateChange() {
     const currentState = appState.timer.state;
     if (currentState === lastTimerState) return;
-
-    if (currentState === 'focus' && musicEnabled) {
-        playFocusMusic();
-    } else if (lastTimerState === 'focus') {
-        stopFocusMusic();
-    }
-
     lastTimerState = currentState;
 }
 
@@ -422,19 +378,124 @@ async function saveSettings() {
     };
 
     const result = await apiCall('/settings', 'PUT', settings);
+
+    // Save Compita settings
+    await saveCompitaSettings();
+
     if (result?.success) {
         elements.settingsModal.style.display = 'none';
         await fetchStatus();
     }
 }
 
-function openSettings() {
+// Compita Settings Functions
+async function loadCompitaSettings() {
+    const result = await apiCall('/compita/settings');
+    if (result) {
+        compitaSettings = {
+            enabled: result.enabled !== false,
+            openai_api_key: result.openai_api_key || '',
+            voice: result.voice || 'coral'
+        };
+        updateCompitaUI();
+    }
+    await updateCompitaStatus();
+}
+
+async function saveCompitaSettings() {
+    const newSettings = {
+        enabled: elements.compitaEnabled.checked,
+        openai_api_key: elements.openaiKeyInput.value.trim(),
+        voice: elements.voiceSelect.value
+    };
+
+    const wasEnabled = compitaEnabled;
+    const result = await apiCall('/compita/settings', 'PUT', newSettings);
+    if (result?.success) {
+        compitaSettings = newSettings;
+        // Store in localStorage as backup
+        localStorage.setItem('compitaEnabled', newSettings.enabled ? 'true' : 'false');
+        localStorage.setItem('compitaVoice', newSettings.voice);
+        // Don't store API key in localStorage for security
+
+        // Handle enabling/disabling voice connection
+        if (newSettings.enabled && !wasEnabled) {
+            enableVoice();
+        } else if (!newSettings.enabled && wasEnabled) {
+            stopVoice();
+        }
+    }
+    await updateCompitaStatus();
+}
+
+function updateCompitaUI() {
+    if (elements.compitaEnabled) {
+        elements.compitaEnabled.checked = compitaSettings.enabled;
+    }
+    if (elements.openaiKeyInput) {
+        // Mask the API key if it exists
+        elements.openaiKeyInput.value = compitaSettings.openai_api_key ?
+            (compitaSettings.openai_api_key.startsWith('sk-') ? compitaSettings.openai_api_key : '••••••••') : '';
+    }
+    if (elements.voiceSelect) {
+        elements.voiceSelect.value = compitaSettings.voice;
+    }
+    toggleCompitaFields(compitaSettings.enabled);
+}
+
+function toggleCompitaFields(enabled) {
+    if (elements.compitaApiKeyGroup) {
+        elements.compitaApiKeyGroup.style.opacity = enabled ? '1' : '0.5';
+        elements.compitaApiKeyGroup.style.pointerEvents = enabled ? 'auto' : 'none';
+    }
+    if (elements.compitaVoiceGroup) {
+        elements.compitaVoiceGroup.style.opacity = enabled ? '1' : '0.5';
+        elements.compitaVoiceGroup.style.pointerEvents = enabled ? 'auto' : 'none';
+    }
+}
+
+async function updateCompitaStatus() {
+    const result = await apiCall('/compita/status');
+    if (!elements.compitaStatus) return;
+
+    elements.compitaStatus.classList.remove('connected', 'disconnected', 'no-key');
+    const statusText = elements.compitaStatus.querySelector('.status-text');
+
+    if (!result) {
+        elements.compitaStatus.classList.add('disconnected');
+        statusText.textContent = 'Unable to connect';
+    } else if (!compitaSettings.enabled) {
+        statusText.textContent = 'Disabled';
+    } else if (!result.has_api_key) {
+        elements.compitaStatus.classList.add('no-key');
+        statusText.textContent = 'API key required';
+    } else if (result.running) {
+        elements.compitaStatus.classList.add('connected');
+        statusText.textContent = 'Connected and running';
+    } else {
+        elements.compitaStatus.classList.add('disconnected');
+        statusText.textContent = 'Not running';
+    }
+}
+
+function toggleApiKeyVisibility() {
+    if (!elements.openaiKeyInput || !elements.btnToggleKey) return;
+
+    const isPassword = elements.openaiKeyInput.type === 'password';
+    elements.openaiKeyInput.type = isPassword ? 'text' : 'password';
+    elements.btnToggleKey.querySelector('.eye-icon').textContent = isPassword ? '🙈' : '👁️';
+}
+
+async function openSettings() {
     const settings = appState.timer.settings;
     document.getElementById('setting-focus').value = settings.focus_duration / 60;
     document.getElementById('setting-short-break').value = settings.short_break_duration / 60;
     document.getElementById('setting-long-break').value = settings.long_break_duration / 60;
-    elements.musicEnabled.checked = musicEnabled;
     document.getElementById('setting-long-break-interval').value = settings.pomodoros_until_long_break;
+
+    // Load Compita settings
+    await loadCompitaSettings();
+
     elements.settingsModal.style.display = 'flex';
 }
 
@@ -734,10 +795,6 @@ function setupEventListeners() {
     elements.btnSkip.addEventListener('click', skipTimer);
     elements.btnCompleteTask.addEventListener('click', completeCurrentTask);
 
-    elements.musicEnabled.addEventListener('change', (e) => {
-        toggleMusic(e.target.checked);
-    });
-
     elements.btnAddTask.addEventListener('click', addTask);
     elements.newTaskTitle.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') addTask();
@@ -821,19 +878,20 @@ function setupEventListeners() {
     elements.completedTasksHeader.addEventListener('click', () => {
         elements.completedTasksSection.classList.toggle('collapsed');
     });
-}
 
-function initAudioOnFirstClick() {
-    const handler = () => {
-        initAudio();
-        document.removeEventListener('click', handler);
-    };
-    document.addEventListener('click', handler);
+    // Compita settings event listeners
+    if (elements.compitaEnabled) {
+        elements.compitaEnabled.addEventListener('change', (e) => {
+            toggleCompitaFields(e.target.checked);
+        });
+    }
+
+    if (elements.btnToggleKey) {
+        elements.btnToggleKey.addEventListener('click', toggleApiKeyVisibility);
+    }
 }
 
 async function init() {
-    loadMusicSetting();
-    initAudioOnFirstClick();
     setupEventListeners();
     await fetchStatus();
 
@@ -855,22 +913,38 @@ let voiceRecognition = null;
 let voiceRecognitionActive = false;
 let voiceAudioQueue = [];
 let voiceIsPlaying = false;
+let compitaEnabled = true; // Track if Compita should be active
 
-function initVoice() {
+async function initVoice() {
     const voiceIndicator = document.getElementById('voice-indicator');
     const voiceStatus = document.getElementById('voice-status');
     const voiceTranscript = document.getElementById('voice-transcript');
 
     if (!voiceIndicator) return;
 
+    // Check if Compita is enabled before starting
+    try {
+        const response = await fetch('/api/compita/status');
+        const status = await response.json();
+        compitaEnabled = status.enabled !== false;
+    } catch (e) {
+        console.log('Could not fetch Compita status, defaulting to enabled');
+    }
+
     voiceIndicator.addEventListener('click', () => {
-        if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) {
+        if (compitaEnabled && (!voiceWs || voiceWs.readyState !== WebSocket.OPEN)) {
             startVoice();
         }
     });
 
     initVoiceSpeechRecognition();
-    startVoice();
+
+    if (compitaEnabled) {
+        startVoice();
+    } else {
+        updateVoiceStatus('Compita disabled');
+        voiceIndicator.classList.add('disabled');
+    }
 }
 
 function initVoiceSpeechRecognition() {
@@ -1070,6 +1144,38 @@ async function startVoice() {
     connectVoiceWebSocket();
 }
 
+function stopVoice() {
+    compitaEnabled = false;
+    voiceIsRecording = false;
+    stopVoiceSpeechRecognition();
+
+    if (voiceWs) {
+        voiceWs.close();
+        voiceWs = null;
+    }
+
+    if (voiceMediaStream) {
+        voiceMediaStream.getTracks().forEach(track => track.stop());
+        voiceMediaStream = null;
+    }
+
+    const voiceIndicator = document.getElementById('voice-indicator');
+    if (voiceIndicator) {
+        voiceIndicator.classList.remove('listening', 'active');
+        voiceIndicator.classList.add('disabled');
+    }
+    updateVoiceStatus('Compita disabled');
+}
+
+function enableVoice() {
+    compitaEnabled = true;
+    const voiceIndicator = document.getElementById('voice-indicator');
+    if (voiceIndicator) {
+        voiceIndicator.classList.remove('disabled');
+    }
+    startVoice();
+}
+
 function connectVoiceWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/compita/stream`;
@@ -1102,8 +1208,12 @@ function connectVoiceWebSocket() {
     voiceWs.onclose = () => {
         voiceIsRecording = false;
         stopVoiceSpeechRecognition();
-        updateVoiceStatus('Disconnected');
-        setTimeout(connectVoiceWebSocket, 3000);
+        if (compitaEnabled) {
+            updateVoiceStatus('Disconnected');
+            setTimeout(connectVoiceWebSocket, 3000);
+        } else {
+            updateVoiceStatus('Compita disabled');
+        }
     };
 
     voiceWs.onerror = (err) => {
