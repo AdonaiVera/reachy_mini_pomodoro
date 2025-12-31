@@ -5,9 +5,10 @@ to control the timer, manage tasks, and retrieve status.
 """
 
 import logging
-from typing import Any, Dict, List, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from reachy_mini_pomodoro.movements import MovementManager
     from reachy_mini_pomodoro.pomodoro_timer import PomodoroTimer
     from reachy_mini_pomodoro.task_manager import TaskManager
 
@@ -45,6 +46,12 @@ def get_pomodoro_tools() -> List[Dict[str, Any]]:
             "type": "function",
             "name": "stop_timer",
             "description": "Stop the current timer and reset to idle state.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "type": "function",
+            "name": "skip_timer",
+            "description": "Skip the current timer session. If in focus mode, skips to break. If in break mode, skips to ready for next focus.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
         {
@@ -95,6 +102,18 @@ def get_pomodoro_tools() -> List[Dict[str, Any]]:
             "description": "Get productivity statistics including pomodoros completed today and tasks finished.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
+        {
+            "type": "function",
+            "name": "get_break_activity",
+            "description": "Get the current break activity suggestion. Only available during a break.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "type": "function",
+            "name": "demo_break_activity",
+            "description": "Have the robot demonstrate the current break activity (like breathing or stretching). Only works during a break when the activity has a robot demo available.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
     ]
 
 
@@ -105,9 +124,11 @@ class PomodoroToolHandler:
         self,
         timer: "PomodoroTimer",
         task_manager: "TaskManager",
+        movement_manager: Optional["MovementManager"] = None,
     ) -> None:
         self.timer = timer
         self.task_manager = task_manager
+        self.movement_manager = movement_manager
 
     async def dispatch(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool by name and return the result."""
@@ -126,16 +147,26 @@ class PomodoroToolHandler:
         status = self.timer.get_status()
         current_task = self.task_manager.get_current_task()
 
-        remaining = status["remaining_seconds"]
+        remaining = status["time_remaining"]
         minutes = remaining // 60
         seconds = remaining % 60
 
-        return {
-            "state": status["state"],
+        state = status["state"]
+        result = {
+            "state": state,
             "time_remaining": f"{minutes} minutes and {seconds} seconds",
             "current_task": current_task.title if current_task else None,
-            "session_count": status.get("session_count", 0),
+            "pomodoros_completed": status.get("total_pomodoros", 0),
         }
+
+        # Add break activity info if on a break
+        if state in ("short_break", "long_break"):
+            activity = status.get("current_break_activity")
+            if activity:
+                result["break_activity"] = activity.get("name")
+                result["has_robot_demo"] = activity.get("robot_demo", False)
+
+        return result
 
     async def _handle_start_focus(self) -> Dict[str, Any]:
         """Start a focus session."""
@@ -177,6 +208,33 @@ class PomodoroToolHandler:
             "message": "Timer stopped" if success else "Could not stop timer",
         }
 
+    async def _handle_skip_timer(self) -> Dict[str, Any]:
+        """Skip the current timer session."""
+        status = self.timer.get_status()
+        state = status.get("state", "idle")
+
+        success = self.timer.skip()
+        if success:
+            if state == "focus":
+                return {
+                    "success": True,
+                    "message": "Focus session skipped. Ready for a break!",
+                }
+            elif state in ("short_break", "long_break"):
+                return {
+                    "success": True,
+                    "message": "Break skipped. Ready for the next focus session!",
+                }
+            else:
+                return {
+                    "success": True,
+                    "message": "Timer skipped.",
+                }
+        return {
+            "success": False,
+            "message": "Nothing to skip - timer is not running.",
+        }
+
     async def _handle_start_break(self) -> Dict[str, Any]:
         """Start a break session."""
         success = self.timer.start_break()
@@ -196,11 +254,13 @@ class PomodoroToolHandler:
 
         tasks = []
         for task in pending:
+            # Convert priority enum to string for JSON serialization
+            priority = task.priority.value if hasattr(task.priority, 'value') else str(task.priority)
             tasks.append({
                 "title": task.title,
                 "pomodoros": f"{task.completed_pomodoros}/{task.estimated_pomodoros}",
                 "is_current": current and task.id == current.id,
-                "priority": task.priority,
+                "priority": priority,
             })
 
         return {
@@ -234,6 +294,9 @@ class PomodoroToolHandler:
 
         task = self.task_manager.complete_task(current.id)
         if task:
+            if self.movement_manager:
+                from reachy_mini_pomodoro.movements import MovementType
+                self.movement_manager.start_movement(MovementType.CELEBRATION, duration=3.0)
             return {
                 "success": True,
                 "message": f"Task '{task.title}' completed!",
@@ -250,3 +313,95 @@ class PomodoroToolHandler:
             "today_tasks_completed": stats.get("today", {}).get("tasks_completed", 0),
             "current_session": timer_status.get("session_count", 0),
         }
+
+    async def _handle_get_break_activity(self) -> Dict[str, Any]:
+        """Get current break activity."""
+        status = self.timer.get_status()
+        state = status.get("state", "")
+
+        if state not in ("short_break", "long_break"):
+            return {
+                "success": False,
+                "message": "No break activity - not currently on a break.",
+            }
+
+        activity = status.get("current_break_activity")
+        if not activity:
+            return {
+                "success": False,
+                "message": "No break activity available.",
+            }
+
+        return {
+            "success": True,
+            "activity_name": activity.get("name"),
+            "activity_description": activity.get("description"),
+            "has_robot_demo": activity.get("robot_demo", False),
+        }
+
+    async def _handle_demo_break_activity(self) -> Dict[str, Any]:
+        """Demo the current break activity with the robot."""
+        status = self.timer.get_status()
+        state = status.get("state", "")
+
+        if state not in ("short_break", "long_break"):
+            return {
+                "success": False,
+                "message": "Can only demo during a break.",
+            }
+
+        activity = status.get("current_break_activity")
+        if not activity:
+            return {
+                "success": False,
+                "message": "No break activity to demo.",
+            }
+
+        if not activity.get("robot_demo", False):
+            return {
+                "success": False,
+                "message": f"The activity '{activity.get('name')}' doesn't have a robot demo.",
+            }
+
+        if not self.movement_manager:
+            return {
+                "success": False,
+                "message": "Robot movement not available.",
+            }
+
+        try:
+            from reachy_mini_pomodoro.movements import MovementType
+
+            activity_name = activity.get("name", "").lower()
+
+            if "breathing" in activity_name or "breath" in activity_name:
+                self.movement_manager.start_movement(
+                    MovementType.BREATHING_DEMO, duration=12.0
+                )
+                return {
+                    "success": True,
+                    "message": "Starting breathing demo! Follow along with the robot.",
+                }
+            elif "stretch" in activity_name or "neck" in activity_name or "shoulder" in activity_name or "wrist" in activity_name:
+                self.movement_manager.start_movement(
+                    MovementType.STRETCH_DEMO, duration=8.0
+                )
+                return {
+                    "success": True,
+                    "message": "Starting stretch demo! Follow along with the robot.",
+                }
+            else:
+                self.movement_manager.start_movement(
+                    MovementType.BREATHING_DEMO, duration=12.0
+                )
+                return {
+                    "success": True,
+                    "message": f"Starting demo for {activity.get('name')}!",
+                }
+
+        except Exception as e:
+            logger.error(f"Error starting demo: {e}")
+            return {
+                "success": False,
+                "message": f"Failed to start robot demo: {str(e)}",
+            }

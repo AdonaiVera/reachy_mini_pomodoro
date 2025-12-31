@@ -354,9 +354,9 @@ async function completeCurrentTask() {
     const taskId = appState.tasks.current_task_id;
     if (!taskId) return;
 
+    await apiCall('/timer/stop', 'POST');
     const result = await apiCall(`/tasks/${taskId}/complete`, 'POST');
     if (result?.success) {
-        await stopTimer();
         await fetchStatus();
     }
 }
@@ -841,6 +841,274 @@ async function init() {
         clearInterval(updateInterval);
     }
     updateInterval = setInterval(fetchStatus, 1000);
+
+    initVoice();
+}
+
+// Voice / Compita functionality
+const VOICE_SAMPLE_RATE = 24000;
+let voiceWs = null;
+let voiceAudioContext = null;
+let voiceMediaStream = null;
+let voiceIsRecording = false;
+let voiceRecognition = null;
+let voiceRecognitionActive = false;
+let voiceAudioQueue = [];
+let voiceIsPlaying = false;
+
+function initVoice() {
+    const voiceIndicator = document.getElementById('voice-indicator');
+    const voiceStatus = document.getElementById('voice-status');
+    const voiceTranscript = document.getElementById('voice-transcript');
+
+    if (!voiceIndicator) return;
+
+    voiceIndicator.addEventListener('click', () => {
+        if (!voiceWs || voiceWs.readyState !== WebSocket.OPEN) {
+            startVoice();
+        }
+    });
+
+    initVoiceSpeechRecognition();
+    startVoice();
+}
+
+function initVoiceSpeechRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        console.log('Speech recognition not supported');
+        return;
+    }
+
+    voiceRecognition = new SpeechRecognition();
+    voiceRecognition.continuous = true;
+    voiceRecognition.interimResults = true;
+    voiceRecognition.lang = 'en-US';
+
+    voiceRecognition.onresult = (event) => {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript.toLowerCase();
+            console.log('Speech detected:', transcript);
+            if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+                voiceWs.send('transcript:' + transcript);
+            }
+        }
+    };
+
+    voiceRecognition.onerror = (event) => {
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+            if (voiceRecognitionActive) {
+                setTimeout(() => {
+                    try { voiceRecognition.start(); } catch (e) {}
+                }, 100);
+            }
+        }
+    };
+
+    voiceRecognition.onend = () => {
+        if (voiceRecognitionActive) {
+            try { voiceRecognition.start(); } catch (e) {}
+        }
+    };
+}
+
+function startVoiceSpeechRecognition() {
+    if (voiceRecognition && !voiceRecognitionActive) {
+        voiceRecognitionActive = true;
+        try { voiceRecognition.start(); } catch (e) {}
+    }
+}
+
+function stopVoiceSpeechRecognition() {
+    voiceRecognitionActive = false;
+    if (voiceRecognition) {
+        try { voiceRecognition.stop(); } catch (e) {}
+    }
+}
+
+async function initVoiceAudio() {
+    try {
+        voiceAudioContext = new AudioContext({ sampleRate: VOICE_SAMPLE_RATE });
+
+        voiceMediaStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                sampleRate: VOICE_SAMPLE_RATE,
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+            }
+        });
+
+        const source = voiceAudioContext.createMediaStreamSource(voiceMediaStream);
+        const processor = voiceAudioContext.createScriptProcessor(4096, 1, 1);
+
+        processor.onaudioprocess = (e) => {
+            if (!voiceIsRecording || !voiceWs || voiceWs.readyState !== WebSocket.OPEN) return;
+
+            const inputData = e.inputBuffer.getChannelData(0);
+            let samples = inputData;
+
+            if (voiceAudioContext.sampleRate !== VOICE_SAMPLE_RATE) {
+                const ratio = VOICE_SAMPLE_RATE / voiceAudioContext.sampleRate;
+                const newLength = Math.round(inputData.length * ratio);
+                samples = new Float32Array(newLength);
+                for (let i = 0; i < newLength; i++) {
+                    const srcIndex = i / ratio;
+                    const srcIndexFloor = Math.floor(srcIndex);
+                    const srcIndexCeil = Math.min(srcIndexFloor + 1, inputData.length - 1);
+                    const t = srcIndex - srcIndexFloor;
+                    samples[i] = inputData[srcIndexFloor] * (1 - t) + inputData[srcIndexCeil] * t;
+                }
+            }
+
+            const pcm16 = new Int16Array(samples.length);
+            for (let i = 0; i < samples.length; i++) {
+                const s = Math.max(-1, Math.min(1, samples[i]));
+                pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+            }
+
+            voiceWs.send(pcm16.buffer);
+        };
+
+        source.connect(processor);
+        processor.connect(voiceAudioContext.destination);
+
+    } catch (err) {
+        console.error('Failed to init voice audio:', err);
+        updateVoiceStatus('Microphone denied');
+    }
+}
+
+function updateVoiceState(state) {
+    const voiceIndicator = document.getElementById('voice-indicator');
+    const voiceStatus = document.getElementById('voice-status');
+    const voiceTranscript = document.getElementById('voice-transcript');
+
+    if (!voiceIndicator) return;
+
+    voiceIndicator.classList.remove('listening', 'active');
+
+    if (state === 'listening') {
+        voiceIndicator.classList.add('listening');
+        voiceStatus.textContent = 'Say "Compita"';
+    } else if (state === 'active') {
+        voiceIndicator.classList.add('active');
+        voiceStatus.textContent = 'Listening...';
+        voiceTranscript.classList.add('visible');
+    } else if (state === 'processing') {
+        voiceStatus.textContent = 'Processing...';
+    }
+}
+
+function updateVoiceStatus(text) {
+    const voiceStatus = document.getElementById('voice-status');
+    if (voiceStatus) voiceStatus.textContent = text;
+}
+
+function addVoiceTranscript(role, text) {
+    const voiceTranscript = document.getElementById('voice-transcript');
+    if (!voiceTranscript) return;
+
+    const line = document.createElement('div');
+    line.className = `voice-transcript-line ${role}`;
+    line.innerHTML = `<strong>${role === 'user' ? 'You' : 'Compita'}:</strong> ${text}`;
+    voiceTranscript.appendChild(line);
+    voiceTranscript.scrollTop = voiceTranscript.scrollHeight;
+    voiceTranscript.classList.add('visible');
+
+    setTimeout(() => {
+        if (voiceTranscript.children.length > 0) {
+            const lastUpdate = voiceTranscript.dataset.lastUpdate;
+            if (lastUpdate && Date.now() - parseInt(lastUpdate) > 5000) {
+                voiceTranscript.classList.remove('visible');
+            }
+        }
+    }, 8000);
+    voiceTranscript.dataset.lastUpdate = Date.now();
+}
+
+async function playVoiceAudio(arrayBuffer) {
+    if (!voiceAudioContext) return;
+
+    const pcm16 = new Int16Array(arrayBuffer);
+    const float32 = new Float32Array(pcm16.length);
+    for (let i = 0; i < pcm16.length; i++) {
+        float32[i] = pcm16[i] / 32768;
+    }
+
+    const audioBuffer = voiceAudioContext.createBuffer(1, float32.length, VOICE_SAMPLE_RATE);
+    audioBuffer.getChannelData(0).set(float32);
+
+    voiceAudioQueue.push(audioBuffer);
+    if (!voiceIsPlaying) {
+        playNextVoiceInQueue();
+    }
+}
+
+function playNextVoiceInQueue() {
+    if (voiceAudioQueue.length === 0) {
+        voiceIsPlaying = false;
+        return;
+    }
+
+    voiceIsPlaying = true;
+    const buffer = voiceAudioQueue.shift();
+    const source = voiceAudioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(voiceAudioContext.destination);
+    source.onended = playNextVoiceInQueue;
+    source.start();
+}
+
+async function startVoice() {
+    await initVoiceAudio();
+
+    if (voiceAudioContext && voiceAudioContext.state === 'suspended') {
+        await voiceAudioContext.resume();
+    }
+
+    connectVoiceWebSocket();
+}
+
+function connectVoiceWebSocket() {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/api/compita/stream`;
+
+    voiceWs = new WebSocket(wsUrl);
+    voiceWs.binaryType = 'arraybuffer';
+
+    voiceWs.onopen = () => {
+        voiceIsRecording = true;
+        updateVoiceState('listening');
+        startVoiceSpeechRecognition();
+        console.log('Voice WebSocket connected');
+    };
+
+    voiceWs.onmessage = (event) => {
+        if (typeof event.data === 'string') {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'transcript') {
+                    addVoiceTranscript(msg.role, msg.text);
+                } else if (msg.type === 'state') {
+                    updateVoiceState(msg.state);
+                }
+            } catch (e) {}
+        } else {
+            playVoiceAudio(event.data);
+        }
+    };
+
+    voiceWs.onclose = () => {
+        voiceIsRecording = false;
+        stopVoiceSpeechRecognition();
+        updateVoiceStatus('Disconnected');
+        setTimeout(connectVoiceWebSocket, 3000);
+    };
+
+    voiceWs.onerror = (err) => {
+        console.error('Voice WebSocket error:', err);
+    };
 }
 
 init();

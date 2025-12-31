@@ -1,5 +1,6 @@
 """Main Pomodoro app for Reachy Mini."""
 
+import asyncio
 import logging
 import threading
 import time
@@ -8,6 +9,7 @@ from typing import List, Optional
 from urllib.parse import urlparse
 
 import uvicorn
+from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from reachy_mini import ReachyMini, ReachyMiniApp
 
@@ -75,6 +77,7 @@ class ReachyMiniPomodoro(ReachyMiniApp):
         self._sound_enabled = True
         self._compita_settings = compita_settings or DEFAULT_COMPITA_SETTINGS
         self._compita = None
+        self._active_voice_session = None  # Track active voice session for notifications
 
     def _handle_timer_event(self, event: TimerEvent) -> None:
         self.logger.info(f"Timer event: {event.event_type} - {event.data}")
@@ -293,13 +296,25 @@ class ReachyMiniPomodoro(ReachyMiniApp):
             return {"success": False, "error": "Task not found or already completed"}
 
         @self.settings_app.post("/api/tasks/{task_id}/complete")
-        def complete_task(task_id: str):
+        async def complete_task(task_id: str):
+            self.logger.info(f"Complete task endpoint called for task_id: {task_id}")
             task = self.task_manager.complete_task(task_id)
             if task:
+                self.logger.info(f"Task found, starting CELEBRATION movement")
                 self.movement_manager.start_movement(
                     MovementType.CELEBRATION, duration=3.0
                 )
+                # Notify voice session about task completion
+                if self._active_voice_session:
+                    try:
+                        await self._active_voice_session.notify_event(
+                            f"The user just completed a task called '{task.title}'. "
+                            "Congratulate them briefly and enthusiastically!"
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"Could not notify voice session: {e}")
                 return {"success": True, "task": task.to_dict()}
+            self.logger.warning(f"Task not found for task_id: {task_id}")
             return {"success": False, "error": "Task not found"}
 
         @self.settings_app.post("/api/tasks/reorder")
@@ -383,6 +398,100 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                     "running": self._compita.is_running(),
                 }
             return {"enabled": False, "running": False}
+
+        @self.settings_app.websocket("/api/compita/stream")
+        async def compita_stream(websocket: WebSocket):
+            """WebSocket endpoint for browser-based voice streaming.
+
+            Uses wake word detection - listens for "Compita" to activate,
+            then returns to listening after conversation timeout.
+            """
+            await websocket.accept()
+            self.logger.info("Browser voice client connected")
+
+            try:
+                from reachy_mini_pomodoro.voice.agent import (
+                    CompitaVoiceSession,
+                    SessionState,
+                )
+
+                # Create callbacks for this WebSocket
+                async def send_audio(audio_bytes: bytes):
+                    try:
+                        await websocket.send_bytes(audio_bytes)
+                    except Exception:
+                        pass
+
+                async def send_transcript(role: str, text: str):
+                    try:
+                        await websocket.send_json({
+                            "type": "transcript",
+                            "role": role,
+                            "text": text,
+                        })
+                    except Exception:
+                        pass
+
+                async def send_state(state: SessionState):
+                    try:
+                        await websocket.send_json({
+                            "type": "state",
+                            "state": state.value,
+                        })
+                    except Exception:
+                        pass
+
+                # Create session with wake word detection
+                session = CompitaVoiceSession(
+                    timer=self.timer,
+                    task_manager=self.task_manager,
+                    movement_manager=self.movement_manager,
+                    on_audio_output=lambda b: asyncio.create_task(send_audio(b)),
+                    on_transcript=lambda r, t: asyncio.create_task(send_transcript(r, t)),
+                    on_state_change=lambda s: asyncio.create_task(send_state(s)),
+                )
+                session.start()
+                self._active_voice_session = session  # Store for notifications
+
+                # Start timeout checker in background
+                timeout_task = asyncio.create_task(session.run_timeout_checker())
+
+                # Receive audio/messages from browser
+                try:
+                    while True:
+                        data = await websocket.receive()
+                        msg_type = data.get("type", "")
+
+                        # Check for disconnect
+                        if msg_type == "websocket.disconnect":
+                            break
+
+                        if "bytes" in data:
+                            await session.process_audio(data["bytes"])
+                        elif "text" in data:
+                            msg = data["text"]
+                            if msg == "close":
+                                break
+                            # Handle wake word from browser speech recognition
+                            elif msg.startswith("transcript:"):
+                                text = msg[11:]
+                                self.logger.info(f"Received transcript: {text}")
+                                await session.handle_user_transcript(text)
+                            # Manual activation (button press)
+                            elif msg == "activate":
+                                await session.activate()
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    self.logger.debug(f"WebSocket receive error: {e}")
+                finally:
+                    session.stop()
+                    timeout_task.cancel()
+
+            except Exception as e:
+                self.logger.error(f"Voice stream error: {e}")
+            finally:
+                self.logger.info("Browser voice client disconnected")
 
     def wrapped_run(self) -> None:
         settings_app_t = None

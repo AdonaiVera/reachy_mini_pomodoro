@@ -15,6 +15,7 @@ class MovementType(Enum):
     """Types of movements the robot can perform."""
     IDLE = "idle"
     BREATHING = "breathing"
+    TALKING = "talking"
     FOCUS_START = "focus_start"
     FOCUS_REMINDER = "focus_reminder"
     FOCUS_COMPLETE = "focus_complete"
@@ -118,6 +119,8 @@ class MovementManager:
             return self._idle_pose()
         elif movement_type == MovementType.BREATHING:
             return self._breathing_pose(elapsed)
+        elif movement_type == MovementType.TALKING:
+            return self._talking_pose(elapsed)
         elif movement_type == MovementType.FOCUS_START:
             return self._focus_start_pose(progress)
         elif movement_type == MovementType.FOCUS_REMINDER:
@@ -177,6 +180,27 @@ class MovementManager:
 
         pose = self._create_pose(pitch=pitch, z=z)
         antennas = np.array([antenna_base + antenna_variation, antenna_base - antenna_variation])
+        return pose, antennas, 0.0
+
+    def _talking_pose(self, elapsed: float) -> Tuple[np.ndarray, np.ndarray, float]:
+        """Subtle talking animation - small nods and tilts like natural speech."""
+        # Quick small nods at varying speeds to simulate speech rhythm
+        nod_fast = 3 * math.sin(2 * math.pi * 2.5 * elapsed)  # Fast subtle nods
+        nod_slow = 2 * math.sin(2 * math.pi * 0.8 * elapsed)  # Slower emphasis nods
+        pitch = nod_fast + nod_slow
+
+        # Slight side-to-side movement
+        roll = 2 * math.sin(2 * math.pi * 0.6 * elapsed + 0.5)
+
+        # Very subtle yaw
+        yaw = 3 * math.sin(2 * math.pi * 0.4 * elapsed)
+
+        # Antennas have slight lively movement
+        antenna_base = 0.25
+        antenna_wiggle = 0.1 * math.sin(2 * math.pi * 1.5 * elapsed)
+
+        pose = self._create_pose(roll=roll, pitch=pitch, yaw=yaw)
+        antennas = np.array([antenna_base + antenna_wiggle, antenna_base - antenna_wiggle])
         return pose, antennas, 0.0
 
     def _focus_start_pose(self, progress: float) -> Tuple[np.ndarray, np.ndarray, float]:

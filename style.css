@@ -1,12 +1,3 @@
-/* Landing Page Styles */
-
-:root {
-    --color-primary: #e74c3c;
-    --color-bg: #1a1a2e;
-    --color-text: #f8f9fa;
-    --color-text-muted: #9ca3af;
-}
-
 * {
     margin: 0;
     padding: 0;
@@ -15,37 +6,31 @@
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--color-bg);
-    color: var(--color-text);
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #fff;
     min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
+    line-height: 1.6;
 }
 
 .landing-container {
-    max-width: 800px;
-    text-align: center;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem;
 }
 
 .hero {
+    text-align: center;
     margin-bottom: 3rem;
 }
 
 .logo {
     font-size: 5rem;
     margin-bottom: 1rem;
-    animation: bounce 2s infinite;
-}
-
-@keyframes bounce {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-10px); }
 }
 
 h1 {
     font-size: 2.5rem;
+    font-weight: 700;
     margin-bottom: 0.5rem;
     background: linear-gradient(135deg, #e74c3c, #f39c12);
     -webkit-background-clip: text;
@@ -55,62 +40,107 @@ h1 {
 
 .tagline {
     font-size: 1.25rem;
-    color: var(--color-text-muted);
+    color: #a0a0a0;
 }
 
 .features {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 1.5rem;
     margin-bottom: 3rem;
 }
 
 .feature {
     background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     padding: 1.5rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: center;
+    transition: transform 0.2s, border-color 0.2s;
+}
+
+.feature:hover {
+    transform: translateY(-4px);
+    border-color: rgba(231, 76, 60, 0.5);
 }
 
 .feature-icon {
-    font-size: 2rem;
+    font-size: 2.5rem;
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
 }
 
 .feature h3 {
-    font-size: 1rem;
+    font-size: 1.1rem;
     margin-bottom: 0.5rem;
+    color: #fff;
 }
 
 .feature p {
-    font-size: 0.875rem;
-    color: var(--color-text-muted);
+    font-size: 0.9rem;
+    color: #a0a0a0;
 }
 
-.install-section {
+.voice-commands, .install-section, .requirements {
     background: rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    padding: 2rem;
     border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
 }
 
-.install-section h2 {
+h2 {
     font-size: 1.25rem;
     margin-bottom: 1rem;
+    color: #f39c12;
 }
 
-.install-section code {
-    display: inline-block;
+ul {
+    list-style: none;
+    padding: 0;
+}
+
+li {
+    padding: 0.5rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+    color: #d0d0d0;
+}
+
+li::before {
+    content: "→";
+    position: absolute;
+    left: 0;
+    color: #e74c3c;
+}
+
+code {
+    display: block;
     background: rgba(0, 0, 0, 0.3);
-    padding: 0.75rem 1.5rem;
+    padding: 1rem;
     border-radius: 8px;
-    font-family: monospace;
-    font-size: 1rem;
-    margin-bottom: 1rem;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 0.85rem;
+    color: #27ae60;
+    overflow-x: auto;
+    margin-top: 0.5rem;
 }
 
 .install-section p {
-    font-size: 0.875rem;
-    color: var(--color-text-muted);
+    color: #a0a0a0;
+    margin-bottom: 0.5rem;
+}
+
+@media (max-width: 600px) {
+    .logo {
+        font-size: 4rem;
+    }
+
+    h1 {
+        font-size: 1.75rem;
+    }
+
+    .features {
+        grid-template-columns: 1fr;
+    }
 }
