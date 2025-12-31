@@ -2,7 +2,7 @@
 title: Reachy Mini Pomodoro
 emoji: 🍅
 colorFrom: red
-colorTo: orange
+colorTo: yellow
 sdk: static
 pinned: false
 short_description: Pomodoro productivity timer with Compita voice assistant
