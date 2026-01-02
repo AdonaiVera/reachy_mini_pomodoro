@@ -15,6 +15,7 @@ tags:
 ---
 
 # Reachy Mini Pomodoro
+https://github.com/user-attachments/assets/2631e247-6300-4941-bbff-c2c5cf1016c7
 
 > **⚠️ Experimental:** This app is under active development. Features may change and bugs may occur. Use at your own risk and feel free to report issues!
 
