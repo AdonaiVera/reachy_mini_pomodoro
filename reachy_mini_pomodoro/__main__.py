@@ -14,8 +14,12 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # For wireless Reachy Mini, use localhost_only=False
-    app = ReachyMiniPomodoro(localhost_only=not args.wireless)
+    media_backend = "no_media" if args.wireless else None
+
+    app = ReachyMiniPomodoro(
+        localhost_only=not args.wireless,
+        media_backend_override=media_backend,
+    )
     try:
         app.wrapped_run()
     except KeyboardInterrupt:

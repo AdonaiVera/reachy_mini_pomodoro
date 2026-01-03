@@ -951,17 +951,27 @@ async function initVoice() {
     if (!voiceIndicator) return;
 
     let hasApiKey = true;
-    // Check if Compita is enabled before starting
+    let robotModeActive = false;
+
     try {
         const response = await fetch('/api/compita/status');
         const status = await response.json();
         compitaEnabled = status.enabled !== false;
         hasApiKey = status.has_api_key !== false;
+        robotModeActive = status.voice_mode === 'robot' && status.running;
 
         if (!hasApiKey) {
             console.log('OpenAI API key not configured');
             voiceIndicator.classList.add('disabled');
             updateVoiceStatus('⚠️ API key missing - check settings');
+            return;
+        }
+
+        if (robotModeActive) {
+            console.log('Robot microphone mode active - browser mic not needed');
+            voiceIndicator.classList.remove('disabled');
+            voiceIndicator.classList.add('listening');
+            updateVoiceStatus('Robot mic: Say "Compita"');
             return;
         }
     } catch (e) {

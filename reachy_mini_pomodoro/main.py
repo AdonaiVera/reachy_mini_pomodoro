@@ -63,18 +63,21 @@ class UpdateCompitaSettingsRequest(BaseModel):
 
 
 class ReachyMiniPomodoro(ReachyMiniApp):
-    """Pomodoro productivity timer app with Reachy Mini robot companion."""
+    """Pomodoro productivity timer app with Reachy Mini robot companion.
+
+    Media backend is auto-detected by the Dashboard for robot mic support.
+    """
 
     custom_app_url: str | None = CUSTOM_APP_URL
-    request_media_backend: str | None = "no_media"
-
     def __init__(
         self,
         localhost_only: bool = True,
         compita_settings: Optional[CompitaSettings] = None,
+        media_backend_override: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.localhost_only = localhost_only
+        self._media_backend_override = media_backend_override
         self.logger = logging.getLogger("reachy_mini.pomodoro")
         self.task_manager = TaskManager()
         self.timer = PomodoroTimer()
@@ -470,22 +473,30 @@ class ReachyMiniPomodoro(ReachyMiniApp):
             has_api_key = bool(
                 self._compita_settings.openai_api_key or os.getenv("OPENAI_API_KEY")
             )
-            if self._compita:
-                return {
-                    "enabled": self._compita_settings.enabled,
-                    "running": self._compita.is_running(),
-                    "has_api_key": has_api_key,
-                }
+            robot_voice_running = (
+                self._robot_voice_loop is not None
+                and self._robot_voice_loop.is_running()
+            )
+            legacy_running = self._compita is not None and self._compita.is_running()
+
+            if robot_voice_running:
+                voice_mode = "robot"
+            elif legacy_running:
+                voice_mode = "legacy"
+            else:
+                voice_mode = "browser"
+
             return {
                 "enabled": self._compita_settings.enabled,
-                "running": False,
+                "running": robot_voice_running or legacy_running,
                 "has_api_key": has_api_key,
+                "voice_mode": voice_mode,
+                "robot_voice_available": self._reachy_mini is not None,
             }
 
         @self.settings_app.get("/api/compita/settings")
         def get_compita_settings():
             """Get Compita voice assistant settings."""
-            # Return masked API key for security
             api_key = self._compita_settings.openai_api_key
             masked_key = ""
             if api_key:
@@ -663,11 +674,12 @@ class ReachyMiniPomodoro(ReachyMiniApp):
             settings_app_t.start()
 
         try:
+            media_backend = self._media_backend_override or self.media_backend
             self.logger.info("Starting Reachy Mini app...")
-            self.logger.info(f"Using media backend: {self.media_backend}")
+            self.logger.info(f"Using media backend: {media_backend}")
             self.logger.info(f"Localhost only: {self.localhost_only}")
             with ReachyMini(
-                media_backend=self.media_backend,
+                media_backend=media_backend,
                 localhost_only=self.localhost_only,
             ) as reachy_mini:
                 self.run(reachy_mini, self.stop_event)
