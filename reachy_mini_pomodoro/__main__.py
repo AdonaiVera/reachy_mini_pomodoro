@@ -4,6 +4,7 @@ import argparse
 
 from reachy_mini_pomodoro.main import ReachyMiniPomodoro
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Reachy Mini Pomodoro App")
     parser.add_argument(

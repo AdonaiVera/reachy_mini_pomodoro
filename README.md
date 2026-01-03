@@ -71,13 +71,13 @@ export OPENAI_API_KEY="sk-your-api-key-here"
 
 ## Usage
 
-### Via Reachy Mini Dashboard
+### Via Reachy Mini Dashboard (Recommended)
 
-Install from the Reachy Mini Dashboard app store, then launch from the dashboard.
+Install from the Reachy Mini Dashboard app store, then launch from the dashboard. The dashboard automatically handles all dependencies including GStreamer for robot audio - no extra steps required.
 
 ### Command Line
 
-**Wireless Robot (Network Connection):**
+**Remote Control from Laptop:**
 ```bash
 python -m reachy_mini_pomodoro --wireless
 ```

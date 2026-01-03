@@ -84,6 +84,8 @@ class ReachyMiniPomodoro(ReachyMiniApp):
         self._compita_settings = compita_settings or DEFAULT_COMPITA_SETTINGS
         self._compita = None
         self._active_voice_session = None  # Track active voice session for notifications
+        self._reachy_mini = None  # Store robot reference for audio
+        self._robot_voice_loop = None  # Robot microphone voice loop
 
     def _handle_timer_event(self, event: TimerEvent) -> None:
         self.logger.info(f"Timer event: {event.event_type} - {event.data}")
@@ -174,13 +176,77 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                 self.logger.error(f"Error stopping Compita: {e}")
             self._compita = None
 
+    def _start_robot_voice_loop(self) -> None:
+        """Start robot microphone voice loop for Compita.
+
+        This uses the robot's built-in microphone instead of browser audio,
+        which works when accessing the app over HTTP (not just HTTPS).
+        """
+        if not self._compita_settings.enabled:
+            self.logger.info("Robot voice loop disabled (Compita is off)")
+            return
+
+        if not self._compita_settings.openai_api_key:
+            self.logger.info("Robot voice loop disabled (no API key)")
+            return
+
+        if self._reachy_mini is None:
+            self.logger.warning("No robot reference available for voice loop")
+            return
+
+        try:
+            if not hasattr(self._reachy_mini, 'media'):
+                self.logger.info("No media available - using browser audio only")
+                return
+
+            # Check if media backend is available
+            try:
+                from reachy_mini.media.media_manager import MediaBackend
+                backend = self._reachy_mini.media.backend
+                if backend == MediaBackend.NO_MEDIA:
+                    self.logger.info("No media backend - using browser audio only")
+                    return
+                self.logger.info(f"Media backend available: {backend}")
+            except Exception as e:
+                self.logger.warning(f"Could not check media backend: {e}")
+
+            from reachy_mini_pomodoro.voice.robot_voice import RobotVoiceLoop
+
+            self._robot_voice_loop = RobotVoiceLoop(
+                robot=self._reachy_mini,
+                timer=self.timer,
+                task_manager=self.task_manager,
+                movement_manager=self.movement_manager,
+                openai_api_key=self._compita_settings.openai_api_key,
+                voice=self._compita_settings.voice,
+            )
+            self._robot_voice_loop.start()
+            self.logger.info("Robot voice loop started (using robot microphone)")
+
+        except ImportError as e:
+            self.logger.info(f"Robot voice dependencies not available: {e}")
+        except Exception as e:
+            self.logger.warning(f"Could not start robot voice loop: {e}")
+
+    def _stop_robot_voice_loop(self) -> None:
+        """Stop the robot microphone voice loop."""
+        if self._robot_voice_loop:
+            try:
+                self._robot_voice_loop.stop()
+                self.logger.info("Robot voice loop stopped")
+            except Exception as e:
+                self.logger.error(f"Error stopping robot voice loop: {e}")
+            self._robot_voice_loop = None
+
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event) -> None:
         self.logger.info("Starting Reachy Mini Pomodoro app...")
+        self._reachy_mini = reachy_mini  # Store robot reference for audio
         self._setup_api_endpoints()
         self.movement_manager.start_movement(MovementType.IDLE, duration=1.0, loop=True)
 
         # Start Compita voice assistant
         self._start_compita()
+        self._start_robot_voice_loop()
 
         loop_period = 1.0 / CONTROL_LOOP_FREQUENCY
 
@@ -207,6 +273,7 @@ class ReachyMiniPomodoro(ReachyMiniApp):
         except KeyboardInterrupt:
             self.logger.info("Received keyboard interrupt, stopping...")
         finally:
+            self._stop_robot_voice_loop()
             self._stop_compita()
             self.logger.info("Pomodoro app stopped.")
 

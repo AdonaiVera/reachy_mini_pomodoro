@@ -410,6 +410,10 @@ async function saveCompitaSettings() {
     };
 
     const wasEnabled = compitaEnabled;
+    const hadApiKey = compitaSettings.openai_api_key && compitaSettings.openai_api_key.length > 0;
+    const hasNewApiKey = newSettings.openai_api_key && newSettings.openai_api_key.length > 0
+        && !newSettings.openai_api_key.startsWith('•');
+
     const result = await apiCall('/compita/settings', 'PUT', newSettings);
     if (result?.success) {
         compitaSettings = newSettings;
@@ -424,8 +428,32 @@ async function saveCompitaSettings() {
         } else if (!newSettings.enabled && wasEnabled) {
             stopVoice();
         }
+
+        if (hasNewApiKey && !hadApiKey && newSettings.enabled) {
+            console.log('API key added, reinitializing voice...');
+            await reinitializeVoice();
+        }
     }
     await updateCompitaStatus();
+}
+
+async function reinitializeVoice() {
+    if (voiceWs) {
+        voiceWs.close();
+        voiceWs = null;
+    }
+    stopVoiceSpeechRecognition();
+
+    const voiceIndicator = document.getElementById('voice-indicator');
+    if (voiceIndicator) {
+        voiceIndicator.classList.remove('disabled', 'listening', 'active');
+    }
+    updateVoiceStatus('Connecting...');
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    initVoiceSpeechRecognition();
+    compitaEnabled = true;
+    await startVoice();
 }
 
 function updateCompitaUI() {
@@ -922,11 +950,20 @@ async function initVoice() {
 
     if (!voiceIndicator) return;
 
+    let hasApiKey = true;
     // Check if Compita is enabled before starting
     try {
         const response = await fetch('/api/compita/status');
         const status = await response.json();
         compitaEnabled = status.enabled !== false;
+        hasApiKey = status.has_api_key !== false;
+
+        if (!hasApiKey) {
+            console.log('OpenAI API key not configured');
+            voiceIndicator.classList.add('disabled');
+            updateVoiceStatus('⚠️ API key missing - check settings');
+            return;
+        }
     } catch (e) {
         console.log('Could not fetch Compita status, defaulting to enabled');
     }
