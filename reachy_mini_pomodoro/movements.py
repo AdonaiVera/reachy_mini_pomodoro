@@ -3,6 +3,7 @@
 import math
 import random
 import time
+import threading
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional, Tuple
@@ -16,6 +17,7 @@ class MovementType(Enum):
     IDLE = "idle"
     BREATHING = "breathing"
     TALKING = "talking"
+    LISTENING = "listening"
     FOCUS_START = "focus_start"
     FOCUS_REMINDER = "focus_reminder"
     FOCUS_COMPLETE = "focus_complete"
@@ -57,12 +59,21 @@ class MovementState:
 
 
 class MovementManager:
-    """Manages robot movements and animations."""
+    """Manages robot movements and animations.
+
+    Supports two layers of movement:
+    1. Primary movements (focus, celebration, etc.) - managed by start_movement/queue_movement
+    2. Speech offsets - audio-driven head wobble layered on top of primary movements
+    """
 
     def __init__(self) -> None:
         self.current_movement: Optional[MovementState] = None
         self.queued_movements: list[MovementState] = []
         self._base_time = time.time()
+
+        self._speech_offsets: Tuple[float, float, float, float, float, float] = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        self._speech_offsets_lock = threading.Lock()
+        self._is_listening = False
 
     def start_movement(self, movement_type: MovementType, duration: float = 2.0,
                        loop: bool = False, data: Optional[dict] = None) -> None:
@@ -91,6 +102,26 @@ class MovementManager:
         self.current_movement = None
         self.queued_movements.clear()
 
+    def set_speech_offsets(self, offsets: Tuple[float, float, float, float, float, float]) -> None:
+        """Set speech-driven head movement offsets.
+
+        These offsets are layered on top of primary movements for realistic talking animation.
+
+        Args:
+            offsets: Tuple of (x, y, z, roll, pitch, yaw) in meters/radians.
+        """
+        with self._speech_offsets_lock:
+            self._speech_offsets = offsets
+
+    def clear_speech_offsets(self) -> None:
+        """Reset speech offsets to zero."""
+        with self._speech_offsets_lock:
+            self._speech_offsets = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    def set_listening(self, listening: bool) -> None:
+        """Set whether the robot is listening (affects subtle animations)."""
+        self._is_listening = listening
+
     def update(self) -> Tuple[np.ndarray, np.ndarray, float]:
         """
         Update and return the current pose.
@@ -98,7 +129,6 @@ class MovementManager:
         Returns:
             Tuple of (head_pose 4x4, antennas [right, left], body_yaw)
         """
-        # Check if we need to advance to next queued movement
         if self.current_movement and self.current_movement.is_complete:
             if self.queued_movements:
                 next_move = self.queued_movements.pop(0)
@@ -107,44 +137,72 @@ class MovementManager:
             else:
                 self.current_movement = None
 
-        # Calculate pose based on current movement
         if self.current_movement is None:
-            return self._idle_pose()
-
-        movement_type = self.current_movement.movement_type
-        progress = self.current_movement.progress
-        elapsed = self.current_movement.elapsed
-
-        if movement_type == MovementType.IDLE:
-            return self._idle_pose()
-        elif movement_type == MovementType.BREATHING:
-            return self._breathing_pose(elapsed)
-        elif movement_type == MovementType.TALKING:
-            return self._talking_pose(elapsed)
-        elif movement_type == MovementType.FOCUS_START:
-            return self._focus_start_pose(progress)
-        elif movement_type == MovementType.FOCUS_REMINDER:
-            return self._focus_reminder_pose(progress)
-        elif movement_type == MovementType.FOCUS_COMPLETE:
-            return self._focus_complete_pose(progress)
-        elif movement_type == MovementType.BREAK_START:
-            return self._break_start_pose(progress)
-        elif movement_type == MovementType.CELEBRATION:
-            return self._celebration_pose(elapsed)
-        elif movement_type == MovementType.TASK_COMPLETE:
-            return self._task_complete_pose(elapsed)
-        elif movement_type == MovementType.NOD_YES:
-            return self._nod_yes_pose(progress)
-        elif movement_type == MovementType.NOD_NO:
-            return self._nod_no_pose(progress)
-        elif movement_type == MovementType.LOOK_AROUND:
-            return self._look_around_pose(elapsed)
-        elif movement_type == MovementType.STRETCH_DEMO:
-            return self._stretch_demo_pose(progress)
-        elif movement_type == MovementType.BREATHING_DEMO:
-            return self._breathing_demo_pose(elapsed)
+            pose, antennas, body_yaw = self._idle_pose()
         else:
-            return self._idle_pose()
+            movement_type = self.current_movement.movement_type
+            progress = self.current_movement.progress
+            elapsed = self.current_movement.elapsed
+
+            if movement_type == MovementType.IDLE:
+                pose, antennas, body_yaw = self._idle_pose()
+            elif movement_type == MovementType.BREATHING:
+                pose, antennas, body_yaw = self._breathing_pose(elapsed)
+            elif movement_type == MovementType.TALKING:
+                pose, antennas, body_yaw = self._talking_pose(elapsed)
+            elif movement_type == MovementType.LISTENING:
+                pose, antennas, body_yaw = self._listening_pose(elapsed)
+            elif movement_type == MovementType.FOCUS_START:
+                pose, antennas, body_yaw = self._focus_start_pose(progress)
+            elif movement_type == MovementType.FOCUS_REMINDER:
+                pose, antennas, body_yaw = self._focus_reminder_pose(progress)
+            elif movement_type == MovementType.FOCUS_COMPLETE:
+                pose, antennas, body_yaw = self._focus_complete_pose(progress)
+            elif movement_type == MovementType.BREAK_START:
+                pose, antennas, body_yaw = self._break_start_pose(progress)
+            elif movement_type == MovementType.CELEBRATION:
+                pose, antennas, body_yaw = self._celebration_pose(elapsed)
+            elif movement_type == MovementType.TASK_COMPLETE:
+                pose, antennas, body_yaw = self._task_complete_pose(elapsed)
+            elif movement_type == MovementType.NOD_YES:
+                pose, antennas, body_yaw = self._nod_yes_pose(progress)
+            elif movement_type == MovementType.NOD_NO:
+                pose, antennas, body_yaw = self._nod_no_pose(progress)
+            elif movement_type == MovementType.LOOK_AROUND:
+                pose, antennas, body_yaw = self._look_around_pose(elapsed)
+            elif movement_type == MovementType.STRETCH_DEMO:
+                pose, antennas, body_yaw = self._stretch_demo_pose(progress)
+            elif movement_type == MovementType.BREATHING_DEMO:
+                pose, antennas, body_yaw = self._breathing_demo_pose(elapsed)
+            else:
+                pose, antennas, body_yaw = self._idle_pose()
+
+        pose = self._apply_speech_offsets(pose)
+
+        return pose, antennas, body_yaw
+
+    def _apply_speech_offsets(self, base_pose: np.ndarray) -> np.ndarray:
+        """Apply speech-driven offsets to the base pose.
+
+        Args:
+            base_pose: The 4x4 pose matrix from the primary movement.
+
+        Returns:
+            Modified 4x4 pose matrix with speech offsets applied.
+        """
+        with self._speech_offsets_lock:
+            x, y, z, roll, pitch, yaw = self._speech_offsets
+
+        if x == 0 and y == 0 and z == 0 and roll == 0 and pitch == 0 and yaw == 0:
+            return base_pose
+
+        offset_pose = np.eye(4)
+        offset_pose[:3, :3] = R.from_euler(
+            "xyz", [math.degrees(roll), math.degrees(pitch), math.degrees(yaw)], degrees=True
+        ).as_matrix()
+        offset_pose[:3, 3] = [x, y, z]
+
+        return base_pose @ offset_pose
 
     def _create_pose(self, roll: float = 0, pitch: float = 0, yaw: float = 0,
                      x: float = 0, y: float = 0, z: float = 0) -> np.ndarray:
@@ -157,11 +215,9 @@ class MovementManager:
     def _idle_pose(self) -> Tuple[np.ndarray, np.ndarray, float]:
         """Subtle idle breathing animation."""
         t = time.time() - self._base_time
-        # Very gentle breathing motion
         pitch = 2 * math.sin(2 * math.pi * 0.15 * t)
         z = 3 * math.sin(2 * math.pi * 0.15 * t)
 
-        # Subtle antenna sway
         antenna_offset = 0.05 * math.sin(2 * math.pi * 0.2 * t)
 
         pose = self._create_pose(pitch=pitch, z=z)
@@ -170,11 +226,9 @@ class MovementManager:
 
     def _breathing_pose(self, elapsed: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Calm breathing animation for focus time."""
-        # Slower, deeper breathing
         pitch = 5 * math.sin(2 * math.pi * 0.1 * elapsed)
         z = 8 * math.sin(2 * math.pi * 0.1 * elapsed)
 
-        # Antennas slightly raised during inhale
         antenna_base = 0.3  # Raised position
         antenna_variation = 0.1 * math.sin(2 * math.pi * 0.1 * elapsed)
 
@@ -184,18 +238,14 @@ class MovementManager:
 
     def _talking_pose(self, elapsed: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Subtle talking animation - small nods and tilts like natural speech."""
-        # Quick small nods at varying speeds to simulate speech rhythm
         nod_fast = 3 * math.sin(2 * math.pi * 2.5 * elapsed)  # Fast subtle nods
         nod_slow = 2 * math.sin(2 * math.pi * 0.8 * elapsed)  # Slower emphasis nods
         pitch = nod_fast + nod_slow
 
-        # Slight side-to-side movement
         roll = 2 * math.sin(2 * math.pi * 0.6 * elapsed + 0.5)
 
-        # Very subtle yaw
         yaw = 3 * math.sin(2 * math.pi * 0.4 * elapsed)
 
-        # Antennas have slight lively movement
         antenna_base = 0.25
         antenna_wiggle = 0.1 * math.sin(2 * math.pi * 1.5 * elapsed)
 
@@ -203,16 +253,30 @@ class MovementManager:
         antennas = np.array([antenna_base + antenna_wiggle, antenna_base - antenna_wiggle])
         return pose, antennas, 0.0
 
+    def _listening_pose(self, elapsed: float) -> Tuple[np.ndarray, np.ndarray, float]:
+        """Attentive listening pose - focused attention with expressive antennas."""
+        pitch = -5
+        roll = 2 * math.sin(2 * math.pi * 0.4 * elapsed)
+        yaw = 3 * math.sin(2 * math.pi * 0.25 * elapsed)
+
+        antenna_base = 0.45
+        antenna_wave = 0.15 * math.sin(2 * math.pi * 0.6 * elapsed)
+        antenna_flutter = 0.05 * math.sin(2 * math.pi * 1.5 * elapsed)
+
+        right_antenna = antenna_base + antenna_wave + antenna_flutter
+        left_antenna = antenna_base + 0.12 * math.sin(2 * math.pi * 0.6 * elapsed + 0.3) + antenna_flutter
+
+        pose = self._create_pose(roll=roll, pitch=pitch, yaw=yaw)
+        antennas = np.array([right_antenna, left_antenna])
+        return pose, antennas, 0.0
+
     def _focus_start_pose(self, progress: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Animation when starting a focus session."""
-        # Quick wake-up motion
         if progress < 0.3:
-            # Look up alertly
             p = progress / 0.3
             pitch = -15 * math.sin(math.pi * p)
             roll = 10 * math.sin(math.pi * p)
         elif progress < 0.6:
-            # Return to center
             p = (progress - 0.3) / 0.3
             pitch = -15 * (1 - p) * math.sin(math.pi * 0.5)
             roll = 10 * (1 - p)
@@ -220,7 +284,6 @@ class MovementManager:
             pitch = 0
             roll = 0
 
-        # Antennas go up excitedly
         antenna_up = 0.5 * min(1.0, progress * 2)
 
         pose = self._create_pose(roll=roll, pitch=pitch)
@@ -229,7 +292,6 @@ class MovementManager:
 
     def _focus_reminder_pose(self, progress: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Gentle reminder during focus session."""
-        # Slight head tilt as if checking on user
         if progress < 0.5:
             p = progress / 0.5
             roll = 8 * math.sin(math.pi * p)
@@ -245,12 +307,10 @@ class MovementManager:
 
     def _focus_complete_pose(self, progress: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Celebration when focus session completes."""
-        # Happy bouncy motion - slower
         bounce = math.sin(math.pi * progress * 2) * (1 - progress)  # Slowed from 4
         z = 15 * bounce
         pitch = -10 * bounce
 
-        # Antennas wave slower
         antenna_wave = 0.5 * math.sin(math.pi * progress * 3)  # Slowed from 6
 
         pose = self._create_pose(pitch=pitch, z=z)
@@ -259,17 +319,15 @@ class MovementManager:
 
     def _break_start_pose(self, progress: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Relaxed pose when break starts."""
-        # Gentle stretch and relax
         if progress < 0.4:
             p = progress / 0.4
-            pitch = -10 * p  # Look up
+            pitch = -10 * p  
             z = 10 * p
         else:
             p = (progress - 0.4) / 0.6
-            pitch = -10 + 15 * p  # Slowly lower
+            pitch = -10 + 15 * p  
             z = 10 - 5 * p
 
-        # Antennas relax down
         antenna_pos = 0.4 * (1 - progress)
 
         pose = self._create_pose(pitch=pitch, z=z)
@@ -278,15 +336,13 @@ class MovementManager:
 
     def _celebration_pose(self, elapsed: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Victory dance for completing tasks."""
-        # Slower, more graceful bouncing and swaying
-        bounce_freq = 1.0  # Slowed from 3.0
-        sway_freq = 0.5    # Slowed from 1.5
+        bounce_freq = 1.0
+        sway_freq = 0.5
 
         z = 15 * abs(math.sin(2 * math.pi * bounce_freq * elapsed))
         yaw = 20 * math.sin(2 * math.pi * sway_freq * elapsed)
         roll = 15 * math.sin(2 * math.pi * sway_freq * elapsed + math.pi / 4)
 
-        # Antennas move slower and smoother
         antenna_wave = 0.6 * math.sin(2 * math.pi * 0.8 * elapsed)  # Slowed from 4.0
 
         pose = self._create_pose(roll=roll, yaw=yaw, z=z)
@@ -295,14 +351,11 @@ class MovementManager:
 
     def _task_complete_pose(self, elapsed: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Happy animation when a task is completed."""
-        # Similar to celebration but shorter and more contained
         if elapsed < 1.0:
-            # Quick victory motion
             z = 20 * math.sin(math.pi * elapsed)
             pitch = -15 * math.sin(math.pi * elapsed)
             antenna_up = 0.7
         else:
-            # Settle down
             p = min(1.0, elapsed - 1.0)
             z = 0
             pitch = 0
@@ -314,7 +367,6 @@ class MovementManager:
 
     def _nod_yes_pose(self, progress: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Nodding yes animation."""
-        # Two nods
         nod_cycle = progress * 2
         pitch = -12 * math.sin(math.pi * nod_cycle * 2)
 
@@ -324,7 +376,6 @@ class MovementManager:
 
     def _nod_no_pose(self, progress: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Shaking head no animation."""
-        # Two shakes
         shake_cycle = progress * 2
         yaw = 15 * math.sin(math.pi * shake_cycle * 2)
 
@@ -334,11 +385,9 @@ class MovementManager:
 
     def _look_around_pose(self, elapsed: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Looking around curiously."""
-        # Random-ish looking pattern
         yaw = 30 * math.sin(2 * math.pi * 0.3 * elapsed)
         pitch = 10 * math.sin(2 * math.pi * 0.2 * elapsed + 0.5)
 
-        # Curious antenna positions
         antenna_offset = 0.3 * math.sin(2 * math.pi * 0.4 * elapsed)
 
         pose = self._create_pose(yaw=yaw, pitch=pitch)
@@ -347,23 +396,18 @@ class MovementManager:
 
     def _stretch_demo_pose(self, progress: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Demonstrate stretching (neck stretches)."""
-        cycle = progress * 4  # 4 stretches: left, right, up, down
-
+        cycle = progress * 4
         if cycle < 1:
-            # Look left
             p = cycle
             yaw = 25 * math.sin(math.pi * p)
         elif cycle < 2:
-            # Look right
             p = cycle - 1
             yaw = -25 * math.sin(math.pi * p)
         elif cycle < 3:
-            # Look up
             p = cycle - 2
             yaw = 0
             pitch = -20 * math.sin(math.pi * p)
         else:
-            # Look down
             p = cycle - 3
             yaw = 0
             pitch = 15 * math.sin(math.pi * p)
@@ -377,26 +421,21 @@ class MovementManager:
 
     def _breathing_demo_pose(self, elapsed: float) -> Tuple[np.ndarray, np.ndarray, float]:
         """Demonstrate deep breathing exercise."""
-        # 4 second breath cycle: 4s in, 4s hold, 4s out
         cycle_duration = 12.0
         cycle_pos = (elapsed % cycle_duration) / cycle_duration
 
         if cycle_pos < 0.33:
-            # Inhale - rise up
             p = cycle_pos / 0.33
             z = 20 * p
             pitch = -10 * p
         elif cycle_pos < 0.66:
-            # Hold
             z = 20
             pitch = -10
         else:
-            # Exhale - lower down
             p = (cycle_pos - 0.66) / 0.34
             z = 20 * (1 - p)
             pitch = -10 * (1 - p)
 
-        # Antennas rise and fall with breath
         antenna_pos = 0.4 * (z / 20)
 
         pose = self._create_pose(pitch=pitch, z=z)

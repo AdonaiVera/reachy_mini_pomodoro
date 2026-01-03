@@ -8,6 +8,10 @@ Supports two audio modes:
 Wake word detection:
 - Listens for "Compita" to activate
 - Conversation times out after silence, returns to listening
+
+Audio-driven head movements:
+- Uses HeadWobbler to analyze audio output
+- Generates realistic head sway/wobble synchronized with speech
 """
 
 import asyncio
@@ -29,6 +33,7 @@ if TYPE_CHECKING:
     from reachy_mini_pomodoro.movements import MovementManager
     from reachy_mini_pomodoro.pomodoro_timer import PomodoroTimer
     from reachy_mini_pomodoro.task_manager import TaskManager
+    from reachy_mini_pomodoro.voice.head_wobbler import HeadWobbler
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +88,7 @@ class CompitaVoiceAgent:
         voice: str = "coral",
         on_audio_output: Optional[Callable[[bytes], None]] = None,
         on_transcript: Optional[Callable[[str, str], None]] = None,
+        head_wobbler: Optional["HeadWobbler"] = None,
     ) -> None:
         """Initialize Compita voice agent.
 
@@ -95,6 +101,7 @@ class CompitaVoiceAgent:
             voice: Voice to use for responses.
             on_audio_output: Callback for audio output (PCM16 bytes at 24kHz).
             on_transcript: Callback for transcripts (role, text).
+            head_wobbler: Optional head wobbler for audio-driven head movements.
         """
         self.timer = timer
         self.task_manager = task_manager
@@ -113,6 +120,7 @@ class CompitaVoiceAgent:
 
         self.on_audio_output = on_audio_output
         self.on_transcript = on_transcript
+        self.head_wobbler = head_wobbler
 
         self._connection: Any = None
         self._running = False
@@ -233,9 +241,16 @@ class CompitaVoiceAgent:
         elif event_type == "input_audio_buffer.speech_started":
             logger.debug("User started speaking")
             self._trigger_animation("listening")
+            # Reset head wobbler when user starts speaking
+            if self.head_wobbler:
+                self.head_wobbler.reset()
+            if self.movement_manager:
+                self.movement_manager.set_listening(True)
 
         elif event_type == "input_audio_buffer.speech_stopped":
             logger.debug("User stopped speaking")
+            if self.movement_manager:
+                self.movement_manager.set_listening(False)
 
         elif event_type == "conversation.item.input_audio_transcription.completed":
             transcript = getattr(event, "transcript", "")
@@ -253,10 +268,12 @@ class CompitaVoiceAgent:
 
         elif event_type == "response.audio.delta":
             delta = getattr(event, "delta", "")
-            if delta and self.on_audio_output:
-                audio_bytes = base64.b64decode(delta)
-                self.on_audio_output(audio_bytes)
-            self._trigger_animation("speaking")
+            if delta:
+                if self.head_wobbler:
+                    self.head_wobbler.feed(delta)  
+                if self.on_audio_output:
+                    audio_bytes = base64.b64decode(delta)
+                    self.on_audio_output(audio_bytes)
 
         elif event_type == "response.done":
             logger.debug("Response complete")
@@ -345,7 +362,7 @@ class CompitaVoiceAgent:
                 return
 
             animations = {
-                "listening": MovementType.NOD_YES,
+                "listening": MovementType.LISTENING,
                 "speaking": MovementType.TALKING,
                 "idle": MovementType.IDLE,
             }
@@ -412,6 +429,9 @@ class CompitaVoiceSession:
 
     Like Alexa - listens for "Compita", activates conversation,
     then returns to listening after timeout.
+
+    Includes audio-driven head movements via HeadWobbler for realistic
+    talking animation synchronized with speech output.
     """
 
     def __init__(
@@ -455,6 +475,28 @@ class CompitaVoiceSession:
         self._running = False
         self._last_activity = 0.0
         self._audio_buffer: list[bytes] = []
+
+        # Head wobbler for audio-driven head movements
+        self._head_wobbler: Optional["HeadWobbler"] = None
+        self._init_head_wobbler()
+
+    def _init_head_wobbler(self) -> None:
+        """Initialize the head wobbler for audio-driven head movements."""
+        if not self.movement_manager:
+            return
+
+        try:
+            from reachy_mini_pomodoro.voice.head_wobbler import HeadWobbler
+
+            self._head_wobbler = HeadWobbler(
+                set_speech_offsets=self.movement_manager.set_speech_offsets
+            )
+            self._head_wobbler.start()
+            logger.info("Head wobbler initialized for audio-driven movements")
+        except ImportError as e:
+            logger.debug(f"Head wobbler not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize head wobbler: {e}")
 
     @property
     def state(self) -> SessionState:
@@ -504,7 +546,6 @@ class CompitaVoiceSession:
         self._set_state(SessionState.ACTIVE)
         self._last_activity = time.time()
 
-        # Create agent with our callbacks
         self._agent = CompitaVoiceAgent(
             timer=self.timer,
             task_manager=self.task_manager,
@@ -514,13 +555,12 @@ class CompitaVoiceSession:
             voice=self.voice,
             on_audio_output=self.on_audio_output,
             on_transcript=self._handle_transcript,
+            head_wobbler=self._head_wobbler,
         )
 
-        # Get buffered audio to send after connection
         buffered_audio = b"".join(self._audio_buffer)
         self._audio_buffer.clear()
 
-        # Start agent connection in background task (don't block)
         async def run_agent():
             try:
                 if buffered_audio:
@@ -535,8 +575,7 @@ class CompitaVoiceSession:
 
     async def _send_buffered_audio(self, audio: bytes) -> None:
         """Send buffered audio once agent is connected."""
-        # Wait for agent to be ready
-        for _ in range(50):  # 5 seconds max
+        for _ in range(50):  
             if self._agent and self._agent._connection:
                 await self._agent.send_audio(audio)
                 logger.debug(f"Sent {len(audio)} bytes of buffered audio")
@@ -549,6 +588,11 @@ class CompitaVoiceSession:
             self._agent.stop()
             self._agent = None
 
+        if self._head_wobbler:
+            self._head_wobbler.reset()
+        if self.movement_manager:
+            self.movement_manager.clear_speech_offsets()
+
         self._set_state(SessionState.LISTENING)
         self._audio_buffer.clear()
         logger.info("Returned to listening mode")
@@ -557,11 +601,9 @@ class CompitaVoiceSession:
         """Handle transcript from agent."""
         self._last_activity = time.time()
 
-        # Forward to external callback
         if self.on_transcript:
             self.on_transcript(role, text)
 
-        # Check for wake word in user speech to stay active
         if role == "user" and "compita" in text.lower():
             self._last_activity = time.time()
 
@@ -574,7 +616,6 @@ class CompitaVoiceSession:
         Returns:
             True if wake word detected.
         """
-        # Include common misrecognitions of "Compita"
         wake_words = [
             "compita", "compíta", "kompita",
             "computer", "compit", "computa",
@@ -621,6 +662,13 @@ class CompitaVoiceSession:
         if self._agent:
             self._agent.stop()
             self._agent = None
+
+        if self._head_wobbler:
+            self._head_wobbler.stop()
+            self._head_wobbler = None
+        if self.movement_manager:
+            self.movement_manager.clear_speech_offsets()
+
         self._set_state(SessionState.LISTENING)
 
     def is_running(self) -> bool:
@@ -642,10 +690,8 @@ class CompitaVoiceSession:
             event_text: Description of the event.
         """
         if self._state == SessionState.LISTENING:
-            # Activate conversation first
             await self._activate_conversation()
-            # Wait a bit for connection to establish
-            for _ in range(30):  # 3 seconds max
+            for _ in range(30):
                 if self._agent and self._agent._connection:
                     break
                 await asyncio.sleep(0.1)
