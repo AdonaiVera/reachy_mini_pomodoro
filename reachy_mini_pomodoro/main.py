@@ -60,6 +60,7 @@ class UpdateCompitaSettingsRequest(BaseModel):
     enabled: Optional[bool] = None
     openai_api_key: Optional[str] = None
     voice: Optional[str] = None
+    system_instructions: Optional[str] = None
 
 
 class ReachyMiniPomodoro(ReachyMiniApp):
@@ -577,6 +578,7 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                 "openai_api_key": masked_key,
                 "voice": self._compita_settings.voice,
                 "has_api_key": bool(api_key),
+                "system_instructions": self._compita_settings.system_instructions,
             }
 
         @self.settings_app.put("/api/compita/settings")
@@ -601,6 +603,10 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                     self._compita_settings.voice = request.voice
                     restart_needed = True
 
+            if request.system_instructions is not None:
+                self._compita_settings.system_instructions = request.system_instructions
+                restart_needed = True
+
             if restart_needed:
                 self._stop_robot_voice_loop()
                 self._stop_compita()
@@ -616,6 +622,7 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                     "enabled": self._compita_settings.enabled,
                     "voice": self._compita_settings.voice,
                     "has_api_key": bool(self._compita_settings.openai_api_key),
+                    "system_instructions": self._compita_settings.system_instructions,
                 }
             }
 
@@ -671,6 +678,7 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                     openai_api_key=api_key,
                     model=self._compita_settings.model,
                     voice=self._compita_settings.voice,
+                    system_instructions=self._compita_settings.system_instructions,
                     on_audio_output=lambda b: asyncio.create_task(send_audio(b)),
                     on_transcript=lambda r, t: asyncio.create_task(send_transcript(r, t)),
                     on_state_change=lambda s: asyncio.create_task(send_state(s)),

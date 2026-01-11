@@ -42,7 +42,8 @@ let lastTimerState = 'idle';
 let compitaSettings = {
     enabled: true,
     openai_api_key: '',
-    voice: 'coral'
+    voice: 'coral',
+    system_instructions: ''
 };
 
 const elements = {
@@ -97,10 +98,12 @@ const elements = {
     compitaEnabled: document.getElementById('compita-enabled'),
     openaiKeyInput: document.getElementById('setting-openai-key'),
     voiceSelect: document.getElementById('setting-voice'),
+    systemInstructionsInput: document.getElementById('setting-system-instructions'),
     btnToggleKey: document.getElementById('btn-toggle-key'),
     compitaStatus: document.getElementById('compita-status'),
     compitaApiKeyGroup: document.getElementById('compita-api-key-group'),
-    compitaVoiceGroup: document.getElementById('compita-voice-group')
+    compitaVoiceGroup: document.getElementById('compita-voice-group'),
+    compitaInstructionsGroup: document.getElementById('compita-instructions-group')
 };
 
 async function apiCall(endpoint, method = 'GET', body = null) {
@@ -395,7 +398,8 @@ async function loadCompitaSettings() {
         compitaSettings = {
             enabled: result.enabled !== false,
             openai_api_key: result.openai_api_key || '',
-            voice: result.voice || 'coral'
+            voice: result.voice || 'coral',
+            system_instructions: result.system_instructions || ''
         };
         updateCompitaUI();
     }
@@ -406,7 +410,8 @@ async function saveCompitaSettings() {
     const newSettings = {
         enabled: elements.compitaEnabled.checked,
         openai_api_key: elements.openaiKeyInput.value.trim(),
-        voice: elements.voiceSelect.value
+        voice: elements.voiceSelect.value,
+        system_instructions: elements.systemInstructionsInput.value.trim()
     };
 
     const wasEnabled = compitaEnabled;
@@ -480,6 +485,9 @@ function updateCompitaUI() {
     if (elements.voiceSelect) {
         elements.voiceSelect.value = compitaSettings.voice;
     }
+    if (elements.systemInstructionsInput) {
+        elements.systemInstructionsInput.value = compitaSettings.system_instructions || '';
+    }
     toggleCompitaFields(compitaSettings.enabled);
 }
 
@@ -491,6 +499,10 @@ function toggleCompitaFields(enabled) {
     if (elements.compitaVoiceGroup) {
         elements.compitaVoiceGroup.style.opacity = enabled ? '1' : '0.5';
         elements.compitaVoiceGroup.style.pointerEvents = enabled ? 'auto' : 'none';
+    }
+    if (elements.compitaInstructionsGroup) {
+        elements.compitaInstructionsGroup.style.opacity = enabled ? '1' : '0.5';
+        elements.compitaInstructionsGroup.style.pointerEvents = enabled ? 'auto' : 'none';
     }
 }
 

@@ -100,7 +100,30 @@ APP_PORT = 8042
 CUSTOM_APP_URL = f"http://{APP_HOST}:{APP_PORT}"
 
 # Update frequency for the main control loop (Hz)
-CONTROL_LOOP_FREQUENCY = 50  # 50 Hz = 20ms per iteration
+CONTROL_LOOP_FREQUENCY = 50  
+
+
+DEFAULT_COMPITA_INSTRUCTIONS = """You are Compita, a friendly and encouraging productivity assistant for the Reachy Mini Pomodoro app.
+
+Your personality:
+- Warm, supportive, and enthusiastic about helping users stay productive
+- Concise - keep responses to 1-2 sentences since users are listening
+- Encouraging without being overwhelming
+- You speak with a slight playful energy
+
+You help users:
+- Check their timer status and time remaining
+- Start, pause, resume, and stop focus sessions
+- Start breaks after completing pomodoros
+- Create and manage tasks
+- Track their productivity stats
+
+When users say "Compita", acknowledge them warmly and ask how you can help.
+When they ask about time remaining, be specific with minutes and seconds.
+Celebrate their progress and completed tasks!
+
+Always use the available tools to get accurate information rather than guessing.
+"""
 
 
 @dataclass
@@ -112,12 +135,9 @@ class CompitaSettings:
     """
 
     enabled: bool = True
-
-    # OpenAI settings
-    openai_api_key: Optional[str] = None  # Falls back to OPENAI_API_KEY env var
+    openai_api_key: Optional[str] = None  
     model: str = "gpt-4o-realtime-preview"
-    voice: str = "coral"  # Options: alloy, echo, fable, onyx, nova, shimmer, coral
+    voice: str = "coral" 
+    system_instructions: str = DEFAULT_COMPITA_INSTRUCTIONS
 
-
-# Default Compita settings
 DEFAULT_COMPITA_SETTINGS = CompitaSettings()

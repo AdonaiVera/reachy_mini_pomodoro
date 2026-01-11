@@ -48,27 +48,7 @@ class SessionState(Enum):
     ACTIVE = "active"  # In conversation with user
     PROCESSING = "processing"  # Processing response
 
-COMPITA_INSTRUCTIONS = """You are Compita, a friendly and encouraging productivity assistant for the Reachy Mini Pomodoro app.
-
-Your personality:
-- Warm, supportive, and enthusiastic about helping users stay productive
-- Concise - keep responses to 1-2 sentences since users are listening
-- Encouraging without being overwhelming
-- You speak with a slight playful energy
-
-You help users:
-- Check their timer status and time remaining
-- Start, pause, resume, and stop focus sessions
-- Start breaks after completing pomodoros
-- Create and manage tasks
-- Track their productivity stats
-
-When users say "Compita", acknowledge them warmly and ask how you can help.
-When they ask about time remaining, be specific with minutes and seconds.
-Celebrate their progress and completed tasks!
-
-Always use the available tools to get accurate information rather than guessing.
-"""
+from reachy_mini_pomodoro.config import DEFAULT_COMPITA_INSTRUCTIONS
 
 
 class CompitaVoiceAgent:
@@ -86,6 +66,7 @@ class CompitaVoiceAgent:
         openai_api_key: Optional[str] = None,
         model: str = "gpt-4o-realtime-preview",
         voice: str = "coral",
+        system_instructions: Optional[str] = None,
         on_audio_output: Optional[Callable[[bytes], None]] = None,
         on_transcript: Optional[Callable[[str, str], None]] = None,
         head_wobbler: Optional["HeadWobbler"] = None,
@@ -99,6 +80,7 @@ class CompitaVoiceAgent:
             openai_api_key: OpenAI API key.
             model: OpenAI model to use.
             voice: Voice to use for responses.
+            system_instructions: Custom system instructions for the assistant.
             on_audio_output: Callback for audio output (PCM16 bytes at 24kHz).
             on_transcript: Callback for transcripts (role, text).
             head_wobbler: Optional head wobbler for audio-driven head movements.
@@ -116,6 +98,7 @@ class CompitaVoiceAgent:
 
         self.model = model
         self.voice = voice
+        self.system_instructions = system_instructions or DEFAULT_COMPITA_INSTRUCTIONS
         self.tool_handler = PomodoroToolHandler(timer, task_manager, movement_manager)
 
         self.on_audio_output = on_audio_output
@@ -174,7 +157,7 @@ class CompitaVoiceAgent:
             try:
                 await conn.session.update(
                     session={
-                        "instructions": COMPITA_INSTRUCTIONS,
+                        "instructions": self.system_instructions,
                         "voice": self.voice,
                         "input_audio_format": "pcm16",
                         "output_audio_format": "pcm16",
@@ -487,6 +470,7 @@ class CompitaVoiceSession:
         openai_api_key: Optional[str] = None,
         model: str = "gpt-4o-realtime-preview",
         voice: str = "coral",
+        system_instructions: Optional[str] = None,
         on_audio_output: Optional[Callable[[bytes], None]] = None,
         on_transcript: Optional[Callable[[str, str], None]] = None,
         on_state_change: Optional[Callable[[SessionState], None]] = None,
@@ -500,6 +484,7 @@ class CompitaVoiceSession:
             openai_api_key: OpenAI API key.
             model: OpenAI model to use.
             voice: Voice to use for responses.
+            system_instructions: Custom system instructions for the assistant.
             on_audio_output: Callback for audio output (PCM16 bytes at 24kHz).
             on_transcript: Callback for transcripts (role, text).
             on_state_change: Callback when session state changes.
@@ -510,6 +495,7 @@ class CompitaVoiceSession:
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         self.model = model
         self.voice = voice
+        self.system_instructions = system_instructions
 
         self.on_audio_output = on_audio_output
         self.on_transcript = on_transcript
@@ -600,6 +586,7 @@ class CompitaVoiceSession:
             openai_api_key=self.openai_api_key,
             model=self.model,
             voice=self.voice,
+            system_instructions=self.system_instructions,
             on_audio_output=self._handle_audio_output,
             on_transcript=self._handle_transcript,
             head_wobbler=self._head_wobbler,
