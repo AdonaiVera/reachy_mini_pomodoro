@@ -77,7 +77,7 @@ Install from the Reachy Mini Dashboard app store, then launch from the dashboard
 
 ### Command Line
 
-**Remote Control from Laptop:**
+**Remote Control from Laptop (WiFi):**
 ```bash
 python -m reachy_mini_pomodoro --wireless
 ```
@@ -88,6 +88,19 @@ python -m reachy_mini_pomodoro
 ```
 
 The web UI will be available at http://localhost:8042
+
+## Command Line Options
+
+| Flag | Description |
+|------|-------------|
+| `--wireless` | Connect to robot over WiFi |
+| `--no-robot-audio` | Use browser microphone instead of robot mic |
+
+**Using Browser Audio:**
+```bash
+# Connect to robot but use browser mic instead of robot mic
+python -m reachy_mini_pomodoro --wireless --no-robot-audio
+```
 
 ## Compita Voice Commands
 

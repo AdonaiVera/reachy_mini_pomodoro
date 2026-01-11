@@ -230,9 +230,9 @@ class CompitaVoiceAgent:
             await self._connection.input_audio_buffer.append(audio=audio_b64)
             self._audio_chunks_sent += 1
             if self._audio_chunks_sent == 1:
-                logger.info(f">>> First audio chunk sent! Size: {len(audio_bytes)} bytes, b64 len: {len(audio_b64)}")
-            elif self._audio_chunks_sent % 100 == 0:
-                logger.info(f"Audio chunks sent: {self._audio_chunks_sent}")
+                logger.debug(f"First audio chunk sent ({len(audio_bytes)} bytes)")
+            elif self._audio_chunks_sent % 500 == 0:
+                logger.debug(f"Audio chunks sent: {self._audio_chunks_sent}")
         except Exception as e:
             logger.error(f"Error sending audio chunk: {e}")
 
@@ -279,10 +279,9 @@ class CompitaVoiceAgent:
             logger.info("OpenAI session configured")
 
         elif event_type == "input_audio_buffer.speech_started":
-            logger.info(">>> SPEECH DETECTED by OpenAI <<<")
+            logger.debug("Speech detected by OpenAI")
             self._speech_detected = True
             self._trigger_animation("listening")
-            # Reset head wobbler when user starts speaking
             if self.head_wobbler:
                 self.head_wobbler.reset()
             if self.movement_manager:
@@ -312,7 +311,7 @@ class CompitaVoiceAgent:
             if delta:
                 self._audio_chunks_received += 1
                 if self._audio_chunks_received == 1:
-                    logger.info(">>> FIRST AUDIO RESPONSE from OpenAI <<<")
+                    logger.debug("First audio response received from OpenAI")
                 if self.head_wobbler:
                     self.head_wobbler.feed(delta)
                 if self.on_audio_output:
@@ -347,7 +346,6 @@ class CompitaVoiceAgent:
             return
 
         try:
-            # Add a system message about the event
             await self._connection.conversation.item.create(
                 item={
                     "type": "message",
@@ -355,7 +353,6 @@ class CompitaVoiceAgent:
                     "content": [{"type": "input_text", "text": f"[System event: {event_text}]"}],
                 }
             )
-            # Trigger a response
             await self._connection.response.create()
             logger.info(f"Injected event: {event_text}")
         except Exception as e:
@@ -572,9 +569,7 @@ class CompitaVoiceSession:
             return
 
         if self._state == SessionState.LISTENING:
-            # Buffer audio for potential wake word
             self._audio_buffer.append(audio_bytes)
-            # Keep only last 2 seconds of audio (24000 * 2 * 2 bytes)
             max_buffer_size = OPENAI_SAMPLE_RATE * 2 * 2
             total_size = sum(len(b) for b in self._audio_buffer)
             while total_size > max_buffer_size and self._audio_buffer:
@@ -594,7 +589,7 @@ class CompitaVoiceSession:
             logger.info("Conversation already active, ignoring activation request")
             return
 
-        logger.info(">>> ACTIVATING CONVERSATION - connecting to OpenAI...")
+        logger.info("Activating conversation - connecting to OpenAI")
         self._set_state(SessionState.ACTIVE)
         self._last_activity = time.time()
 

@@ -102,13 +102,6 @@ class RobotVoiceLoop:
         """Main async run loop."""
         try:
             self._wake_word_detector = WakeWordDetector()
-            if self._wake_word_detector._use_simple_detection:
-                logger.warning(
-                    "Wake word detector using simple mode (openWakeWord not installed). "
-                    "Wake word detection will NOT work. Use UI button to activate."
-                )
-            else:
-                logger.info("Wake word detector using openWakeWord - say 'hey jarvis' to activate")
         except Exception as e:
             logger.warning(f"Wake word detector not available: {e}")
 
@@ -178,8 +171,8 @@ class RobotVoiceLoop:
                 self._last_audio_rms = float(rms)
                 self._last_audio_max = float(max_val)
 
-                if frame_count % 100 == 0:
-                    logger.info(f"Audio frames: {frame_count}, state: {self._session.state.value if self._session else 'no session'}, rms: {rms:.6f}, max: {max_val:.6f}")
+                if frame_count % 500 == 0:
+                    logger.debug(f"Audio frames: {frame_count}, state: {self._session.state.value if self._session else 'no session'}")
 
                 if self._session:
                     if len(audio_frame.shape) > 1 and audio_frame.shape[1] > 1:

@@ -16,8 +16,6 @@ dependencies = [
     "scipy>=1.11.0",
     "uvicorn>=0.27.0",
     "openai>=1.0.0",
-    "onnxruntime>=1.10.0",
-    "openwakeword @ git+https://github.com/dscripka/openWakeWord.git@main",
 ]
 keywords = ["reachy-mini-app", "pomodoro", "productivity", "timer", "compita"]
 
