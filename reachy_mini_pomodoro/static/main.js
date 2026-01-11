@@ -451,6 +451,18 @@ async function reinitializeVoice() {
     updateVoiceStatus('Connecting...');
     await new Promise(resolve => setTimeout(resolve, 1000));
 
+    try {
+        const response = await fetch('/api/compita/status');
+        const status = await response.json();
+        if (status.voice_mode === 'robot' && status.running) {
+            voiceIndicator.classList.add('listening');
+            updateVoiceStatus('Robot mic: Say "Compita"');
+            return;
+        }
+    } catch (e) {
+        console.log('Could not check robot mode status');
+    }
+
     initVoiceSpeechRecognition();
     compitaEnabled = true;
     await startVoice();
