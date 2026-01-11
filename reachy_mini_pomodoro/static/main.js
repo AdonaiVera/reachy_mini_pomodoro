@@ -1223,6 +1223,21 @@ function enableVoice() {
     startVoice();
 }
 
+async function activateCompita() {
+    if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+        voiceWs.send('activate');
+        console.log('Sent activate via WebSocket');
+    } else {
+        try {
+            const response = await fetch('/api/compita/activate', { method: 'POST' });
+            const result = await response.json();
+            console.log('Activate API response:', result);
+        } catch (e) {
+            console.error('Failed to activate Compita:', e);
+        }
+    }
+}
+
 function connectVoiceWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/api/compita/stream`;

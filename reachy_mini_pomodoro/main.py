@@ -179,28 +179,30 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                 self.logger.error(f"Error stopping Compita: {e}")
             self._compita = None
 
-    def _start_robot_voice_loop(self) -> None:
+    def _start_robot_voice_loop(self) -> bool:
         """Start robot microphone voice loop for Compita.
 
         This uses the robot's built-in microphone instead of browser audio,
         which works when accessing the app over HTTP (not just HTTPS).
+
+        Returns True if robot voice started successfully, False otherwise.
         """
         if not self._compita_settings.enabled:
             self.logger.info("Robot voice loop disabled (Compita is off)")
-            return
+            return False
 
         if not self._compita_settings.openai_api_key:
             self.logger.info("Robot voice loop disabled (no API key)")
-            return
+            return False
 
         if self._reachy_mini is None:
             self.logger.warning("No robot reference available for voice loop")
-            return
+            return False
 
         try:
             if not hasattr(self._reachy_mini, 'media'):
                 self.logger.info("No media available - using browser audio only")
-                return
+                return False
 
             # Check if media backend is available
             try:
@@ -208,10 +210,11 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                 backend = self._reachy_mini.media.backend
                 if backend == MediaBackend.NO_MEDIA:
                     self.logger.info("No media backend - using browser audio only")
-                    return
+                    return False
                 self.logger.info(f"Media backend available: {backend}")
             except Exception as e:
                 self.logger.warning(f"Could not check media backend: {e}")
+                return False
 
             from reachy_mini_pomodoro.voice.robot_voice import RobotVoiceLoop
 
@@ -225,11 +228,14 @@ class ReachyMiniPomodoro(ReachyMiniApp):
             )
             self._robot_voice_loop.start()
             self.logger.info("Robot voice loop started (using robot microphone)")
+            return True
 
         except ImportError as e:
             self.logger.info(f"Robot voice dependencies not available: {e}")
+            return False
         except Exception as e:
             self.logger.warning(f"Could not start robot voice loop: {e}")
+            return False
 
     def _stop_robot_voice_loop(self) -> None:
         """Stop the robot microphone voice loop."""
@@ -247,9 +253,9 @@ class ReachyMiniPomodoro(ReachyMiniApp):
         self._setup_api_endpoints()
         self.movement_manager.start_movement(MovementType.IDLE, duration=1.0, loop=True)
 
-        # Start Compita voice assistant
-        self._start_compita()
-        self._start_robot_voice_loop()
+        robot_voice_started = self._start_robot_voice_loop()
+        if not robot_voice_started:
+            self._start_compita()
 
         loop_period = 1.0 / CONTROL_LOOP_FREQUENCY
 
@@ -486,13 +492,74 @@ class ReachyMiniPomodoro(ReachyMiniApp):
             else:
                 voice_mode = "browser"
 
+            robot_voice_debug = {}
+            if self._robot_voice_loop:
+                robot_voice_debug = {
+                    "input_sample_rate": getattr(self._robot_voice_loop, "_input_sample_rate", None),
+                    "output_sample_rate": getattr(self._robot_voice_loop, "_output_sample_rate", None),
+                    "session_active": self._robot_voice_loop._session is not None if hasattr(self._robot_voice_loop, "_session") else False,
+                }
+
             return {
                 "enabled": self._compita_settings.enabled,
                 "running": robot_voice_running or legacy_running,
                 "has_api_key": has_api_key,
                 "voice_mode": voice_mode,
                 "robot_voice_available": self._reachy_mini is not None,
+                "robot_voice_debug": robot_voice_debug,
             }
+
+        @self.settings_app.post("/api/compita/activate")
+        async def activate_compita():
+            """Manually activate Compita (useful when wake word detection isn't available)."""
+            if self._robot_voice_loop and self._robot_voice_loop._session:
+                await self._robot_voice_loop._session.activate()
+                return {"success": True, "message": "Compita activated"}
+            elif self._compita_session:
+                await self._compita_session.activate()
+                return {"success": True, "message": "Compita activated"}
+            return {"success": False, "message": "No active voice session"}
+
+        @self.settings_app.get("/api/compita/debug")
+        def get_compita_debug():
+            """Get detailed debug info for Compita voice."""
+            debug = {
+                "robot_voice_loop": None,
+                "session": None,
+                "agent": None,
+            }
+
+            if self._robot_voice_loop:
+                debug["robot_voice_loop"] = {
+                    "running": self._robot_voice_loop._running,
+                    "input_sample_rate": self._robot_voice_loop._input_sample_rate,
+                    "output_sample_rate": self._robot_voice_loop._output_sample_rate,
+                    "has_session": self._robot_voice_loop._session is not None,
+                    "audio_rms": getattr(self._robot_voice_loop, "_last_audio_rms", 0),
+                    "audio_max": getattr(self._robot_voice_loop, "_last_audio_max", 0),
+                }
+
+                if self._robot_voice_loop._session:
+                    session = self._robot_voice_loop._session
+                    debug["session"] = {
+                        "state": session._state.value,
+                        "running": session._running,
+                        "has_agent": session._agent is not None,
+                    }
+
+                    if session._agent:
+                        agent = session._agent
+                        debug["agent"] = {
+                            "running": agent._running,
+                            "has_connection": agent._connection is not None,
+                            "audio_chunks_sent": agent._audio_chunks_sent,
+                            "audio_chunks_received": getattr(agent, "_audio_chunks_received", 0),
+                            "speech_detected": getattr(agent, "_speech_detected", False),
+                            "last_event": getattr(agent, "_last_event", ""),
+                            "last_error": getattr(agent, "_last_error", ""),
+                        }
+
+            return debug
 
         @self.settings_app.get("/api/compita/settings")
         def get_compita_settings():
@@ -534,12 +601,14 @@ class ReachyMiniPomodoro(ReachyMiniApp):
                     self._compita_settings.voice = request.voice
                     restart_needed = True
 
-            # Restart Compita if settings changed
-            if restart_needed and self._compita_settings.enabled:
+            if restart_needed:
+                self._stop_robot_voice_loop()
                 self._stop_compita()
-                self._start_compita()
-            elif restart_needed and not self._compita_settings.enabled:
-                self._stop_compita()
+
+                if self._compita_settings.enabled:
+                    robot_voice_started = self._start_robot_voice_loop()
+                    if not robot_voice_started:
+                        self._start_compita()
 
             return {
                 "success": True,

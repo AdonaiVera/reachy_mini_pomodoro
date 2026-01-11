@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 OPENAI_SAMPLE_RATE = 24000
 WAKE_WORD_SAMPLE_RATE = 16000
-CONVERSATION_TIMEOUT = 10.0  # seconds of silence before returning to listening
+CONVERSATION_TIMEOUT = 30.0  # seconds of silence before returning to listening
 
 
 class SessionState(Enum):
@@ -124,8 +124,14 @@ class CompitaVoiceAgent:
 
         self._connection: Any = None
         self._running = False
+        self._session_ready = False  # True after session.update completes
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._audio_chunks_sent = 0
+        self._audio_chunks_received = 0
+        self._speech_detected = False
+        self._last_event = ""
+        self._last_error = ""
 
     def start(self) -> None:
         """Start the voice agent in a background thread."""
@@ -148,6 +154,8 @@ class CompitaVoiceAgent:
 
     async def connect(self) -> None:
         """Connect to OpenAI Realtime API."""
+        self._loop = asyncio.get_event_loop()
+
         try:
             from openai import AsyncOpenAI
         except ImportError:
@@ -161,27 +169,32 @@ class CompitaVoiceAgent:
         async with client.beta.realtime.connect(model=self.model) as conn:
             self._connection = conn
             self._running = True
-            logger.info("Connected to OpenAI Realtime API")
+            logger.info("Connected to OpenAI Realtime API (beta)")
 
-            # Configure the session
-            await conn.session.update(
-                session={
-                    "instructions": COMPITA_INSTRUCTIONS,
-                    "voice": self.voice,
-                    "input_audio_format": "pcm16",
-                    "output_audio_format": "pcm16",
-                    "input_audio_transcription": {"model": "whisper-1"},
-                    "turn_detection": {
-                        "type": "server_vad",
-                        "threshold": 0.5,
-                        "prefix_padding_ms": 300,
-                        "silence_duration_ms": 500,
-                    },
-                    "tools": get_pomodoro_tools(),
-                    "tool_choice": "auto",
-                }
-            )
+            try:
+                await conn.session.update(
+                    session={
+                        "instructions": COMPITA_INSTRUCTIONS,
+                        "voice": self.voice,
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "input_audio_transcription": {"model": "whisper-1"},
+                        "turn_detection": {
+                            "type": "server_vad",
+                            "threshold": 0.5,
+                            "prefix_padding_ms": 300,
+                            "silence_duration_ms": 500,
+                        },
+                        "tools": get_pomodoro_tools(),
+                        "tool_choice": "auto",
+                    }
+                )
+                logger.info("Session update sent successfully")
+            except Exception as e:
+                logger.error(f"Failed to update session: {e}")
+                return
 
+            self._session_ready = True
             logger.info("Session configured, ready for audio")
 
             # Process events
@@ -193,17 +206,43 @@ class CompitaVoiceAgent:
         self._connection = None
         self._running = False
 
-    async def send_audio(self, audio_bytes: bytes) -> None:
-        """Send audio data to OpenAI.
+    def send_audio_sync(self, audio_bytes: bytes) -> None:
+        """Send audio data to OpenAI (thread-safe, schedules on agent's loop).
 
         Args:
             audio_bytes: PCM16 audio at 24kHz, mono.
         """
-        if not self._connection:
+        if not self._connection or not self._session_ready or not self._loop:
             return
 
-        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-        await self._connection.input_audio_buffer.append(audio=audio_b64)
+        if not audio_bytes or len(audio_bytes) == 0:
+            return
+
+        asyncio.run_coroutine_threadsafe(self._send_audio_internal(audio_bytes), self._loop)
+
+    async def _send_audio_internal(self, audio_bytes: bytes) -> None:
+        """Internal async method to send audio (runs on agent's event loop)."""
+        if not self._connection or not self._session_ready:
+            return
+
+        try:
+            audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+            await self._connection.input_audio_buffer.append(audio=audio_b64)
+            self._audio_chunks_sent += 1
+            if self._audio_chunks_sent == 1:
+                logger.info(f">>> First audio chunk sent! Size: {len(audio_bytes)} bytes, b64 len: {len(audio_b64)}")
+            elif self._audio_chunks_sent % 100 == 0:
+                logger.info(f"Audio chunks sent: {self._audio_chunks_sent}")
+        except Exception as e:
+            logger.error(f"Error sending audio chunk: {e}")
+
+    async def send_audio(self, audio_bytes: bytes) -> None:
+        """Send audio data to OpenAI (async version, use from same event loop).
+
+        Args:
+            audio_bytes: PCM16 audio at 24kHz, mono.
+        """
+        await self._send_audio_internal(audio_bytes)
 
     async def send_audio_array(self, audio: np.ndarray, sample_rate: int) -> None:
         """Send audio numpy array to OpenAI.
@@ -231,15 +270,17 @@ class CompitaVoiceAgent:
     async def _handle_event(self, event: Any) -> None:
         """Handle an event from the OpenAI Realtime connection."""
         event_type = event.type
+        self._last_event = event_type
 
         if event_type == "session.created":
-            logger.debug("Session created")
+            logger.info("OpenAI session created")
 
         elif event_type == "session.updated":
-            logger.debug("Session updated")
+            logger.info("OpenAI session configured")
 
         elif event_type == "input_audio_buffer.speech_started":
-            logger.debug("User started speaking")
+            logger.info(">>> SPEECH DETECTED by OpenAI <<<")
+            self._speech_detected = True
             self._trigger_animation("listening")
             # Reset head wobbler when user starts speaking
             if self.head_wobbler:
@@ -269,8 +310,11 @@ class CompitaVoiceAgent:
         elif event_type == "response.audio.delta":
             delta = getattr(event, "delta", "")
             if delta:
+                self._audio_chunks_received += 1
+                if self._audio_chunks_received == 1:
+                    logger.info(">>> FIRST AUDIO RESPONSE from OpenAI <<<")
                 if self.head_wobbler:
-                    self.head_wobbler.feed(delta)  
+                    self.head_wobbler.feed(delta)
                 if self.on_audio_output:
                     audio_bytes = base64.b64decode(delta)
                     self.on_audio_output(audio_bytes)
@@ -284,7 +328,11 @@ class CompitaVoiceAgent:
 
         elif event_type == "error":
             error = getattr(event, "error", {})
-            logger.error(f"API error: {error}")
+            self._last_error = str(error)
+            error_code = getattr(error, "code", "unknown")
+            error_msg = getattr(error, "message", str(error))
+            event_id = getattr(event, "event_id", None)
+            logger.error(f"API error [{error_code}]: {error_msg} (event_id={event_id})")
 
     async def inject_event(self, event_text: str) -> None:
         """Inject a system event into the conversation.
@@ -534,15 +582,19 @@ class CompitaVoiceSession:
                 total_size -= len(removed)
 
         elif self._state == SessionState.ACTIVE and self._agent:
-            await self._agent.send_audio(audio_bytes)
-            self._last_activity = time.time()
+            if self._agent._session_ready and self._agent._loop:
+                self._agent.send_audio_sync(audio_bytes)
+                self._last_activity = time.time()
+            else:
+                self._audio_buffer.append(audio_bytes)
 
     async def _activate_conversation(self) -> None:
         """Activate conversation mode - connect to OpenAI."""
         if self._agent and self._agent.is_running():
+            logger.info("Conversation already active, ignoring activation request")
             return
 
-        logger.info("Activating conversation...")
+        logger.info(">>> ACTIVATING CONVERSATION - connecting to OpenAI...")
         self._set_state(SessionState.ACTIVE)
         self._last_activity = time.time()
 
@@ -553,7 +605,7 @@ class CompitaVoiceSession:
             openai_api_key=self.openai_api_key,
             model=self.model,
             voice=self.voice,
-            on_audio_output=self.on_audio_output,
+            on_audio_output=self._handle_audio_output,
             on_transcript=self._handle_transcript,
             head_wobbler=self._head_wobbler,
         )
@@ -574,10 +626,10 @@ class CompitaVoiceSession:
         asyncio.create_task(run_agent())
 
     async def _send_buffered_audio(self, audio: bytes) -> None:
-        """Send buffered audio once agent is connected."""
-        for _ in range(50):  
-            if self._agent and self._agent._connection:
-                await self._agent.send_audio(audio)
+        """Send buffered audio once agent is ready."""
+        for _ in range(50):
+            if self._agent and self._agent._session_ready and self._agent._loop:
+                self._agent.send_audio_sync(audio)
                 logger.debug(f"Sent {len(audio)} bytes of buffered audio")
                 return
             await asyncio.sleep(0.1)
@@ -596,6 +648,12 @@ class CompitaVoiceSession:
         self._set_state(SessionState.LISTENING)
         self._audio_buffer.clear()
         logger.info("Returned to listening mode")
+
+    def _handle_audio_output(self, audio_bytes: bytes) -> None:
+        """Handle audio output from agent - update activity and forward."""
+        self._last_activity = time.time()
+        if self.on_audio_output:
+            self.on_audio_output(audio_bytes)
 
     def _handle_transcript(self, role: str, text: str) -> None:
         """Handle transcript from agent."""
@@ -692,10 +750,10 @@ class CompitaVoiceSession:
         if self._state == SessionState.LISTENING:
             await self._activate_conversation()
             for _ in range(30):
-                if self._agent and self._agent._connection:
+                if self._agent and self._agent._session_ready:
                     break
                 await asyncio.sleep(0.1)
 
-        if self._agent and self._agent._connection:
+        if self._agent and self._agent._session_ready:
             await self._agent.inject_event(event_text)
             self._last_activity = time.time()

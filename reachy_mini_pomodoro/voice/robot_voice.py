@@ -70,6 +70,8 @@ class RobotVoiceLoop:
 
         self._input_sample_rate: Optional[int] = None
         self._output_sample_rate: Optional[int] = None
+        self._last_audio_rms: float = 0.0
+        self._last_audio_max: float = 0.0
 
     def start(self) -> None:
         """Start the robot voice loop in a background thread."""
@@ -100,6 +102,13 @@ class RobotVoiceLoop:
         """Main async run loop."""
         try:
             self._wake_word_detector = WakeWordDetector()
+            if self._wake_word_detector._use_simple_detection:
+                logger.warning(
+                    "Wake word detector using simple mode (openWakeWord not installed). "
+                    "Wake word detection will NOT work. Use UI button to activate."
+                )
+            else:
+                logger.info("Wake word detector using openWakeWord - say 'hey jarvis' to activate")
         except Exception as e:
             logger.warning(f"Wake word detector not available: {e}")
 
@@ -146,16 +155,42 @@ class RobotVoiceLoop:
     async def _record_loop(self) -> None:
         """Record audio from robot mic and process it."""
         logger.info("Robot voice record loop started")
+        frame_count = 0
+        none_count = 0
 
         while self._running:
             try:
                 audio_frame = self._robot.media.get_audio_sample()
 
-                if audio_frame is not None and self._session:
-                    if audio_frame.dtype in (np.float32, np.float64):
-                        audio_int16 = (audio_frame * 32767).astype(np.int16)
+                if audio_frame is None:
+                    none_count += 1
+                    if none_count % 500 == 0:
+                        logger.warning(f"No audio frames received ({none_count} None samples)")
+                    await asyncio.sleep(0.01)
+                    continue
+
+                frame_count += 1
+                if frame_count == 1:
+                    logger.info(f"First audio frame received! Shape: {audio_frame.shape}, dtype: {audio_frame.dtype}")
+
+                rms = np.sqrt(np.mean(audio_frame.astype(np.float32) ** 2))
+                max_val = np.max(np.abs(audio_frame))
+                self._last_audio_rms = float(rms)
+                self._last_audio_max = float(max_val)
+
+                if frame_count % 100 == 0:
+                    logger.info(f"Audio frames: {frame_count}, state: {self._session.state.value if self._session else 'no session'}, rms: {rms:.6f}, max: {max_val:.6f}")
+
+                if self._session:
+                    if len(audio_frame.shape) > 1 and audio_frame.shape[1] > 1:
+                        audio_mono = np.mean(audio_frame, axis=1)
                     else:
-                        audio_int16 = audio_frame.astype(np.int16)
+                        audio_mono = audio_frame.flatten()
+
+                    if audio_mono.dtype in (np.float32, np.float64):
+                        audio_int16 = (audio_mono * 32767).astype(np.int16)
+                    else:
+                        audio_int16 = audio_mono.astype(np.int16)
 
                     if self._input_sample_rate and self._input_sample_rate != OPENAI_SAMPLE_RATE:
                         target_len = int(
@@ -171,7 +206,7 @@ class RobotVoiceLoop:
                         self._session.state == SessionState.LISTENING
                         and self._wake_word_detector
                     ):
-                        if self._wake_word_detector.check(audio_resampled):
+                        if self._wake_word_detector.process_audio(audio_resampled):
                             logger.info("Wake word detected from robot mic!")
                             await self._session.activate()
 
@@ -188,6 +223,7 @@ class RobotVoiceLoop:
         try:
             audio_int16 = np.frombuffer(audio_bytes, dtype=np.int16)
             audio_float = audio_int16.astype(np.float32) / 32767.0
+
             if self._output_sample_rate and self._output_sample_rate != OPENAI_SAMPLE_RATE:
                 target_len = int(
                     len(audio_float) * self._output_sample_rate / OPENAI_SAMPLE_RATE
@@ -195,7 +231,9 @@ class RobotVoiceLoop:
                 audio_resampled = resample(audio_float, target_len).astype(np.float32)
             else:
                 audio_resampled = audio_float
-            self._robot.media.push_audio_sample(audio_resampled)
+
+            audio_output = audio_resampled.reshape(-1, 1)
+            self._robot.media.push_audio_sample(audio_output)
 
         except Exception as e:
             logger.debug(f"Audio output error: {e}")
